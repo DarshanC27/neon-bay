@@ -39,13 +39,18 @@
     // with mp_server.py: talk to it over a WebSocket; anywhere else (GitHub Pages, a plain file server): peer-to-peer
     const sock = (ws = N.serverAvailable ? new WebSocket(url) : new G.P2PSock(N.room));
     N.mode = N.serverAvailable ? "server" : "p2p";
-    sock.onopen = () => { retryMs = 1000; sock.send(JSON.stringify({ type: "hello", name: N.name, room: N.room })); };
+    sock.onopen = () => { retryMs = 1000; N.warnedBlocked = false; sock.send(JSON.stringify({ type: "hello", name: N.name, room: N.room })); };
     sock.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch (err) { return; } onMessage(m); };
     sock.onclose = () => {
       if (sock !== ws) return;
       const was = N.on; teardown();
       if (!wantOnline) return setStatus("offline");
       setStatus("reconnecting"); if (was) G.ui.toast("Connection lost, reconnecting…", "#ff4d6d");
+      else if (sock.unreachable && !N.warnedBlocked) { // the room exists but WebRTC could not get through
+        N.warnedBlocked = true;
+        G.ui.toast(G.P2P_HAS_TURN ? "Can't reach the room host: the relay failed. Retrying…"
+          : "Can't reach the room host: this network blocks player-to-player links (e.g. eduroam). Try a phone hotspot.", "#ff4d6d");
+      }
       retryTO = setTimeout(open, retryMs); retryMs = Math.min(8000, retryMs * 2);
     };
   }

@@ -6,11 +6,24 @@
 // to introduce browsers to each other. If the host leaves, everyone reconnects and the first to grab the id hosts.
 (function () {
   const PEERJS = "https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js";
-  const ICE = [
-    { urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" },
-    { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" },
+  // STUN finds each browser's public address; that is enough on most home / mobile networks. Networks that block
+  // device-to-device traffic (eduroam, many offices) also need a TURN relay. No free public relay is reliable, so add
+  // your own here (e.g. a free metered.ca / expressturn.com account), or per browser: ?turn=turn:host:port,user,pass
+  const TURN = [
+    // { urls: ["turn:example.com:3478", "turns:example.com:443?transport=tcp"], username: "user", credential: "pass" },
   ];
-  G.ICE_SERVERS = ICE;
+  function userTurn() {
+    const out = [];
+    try {
+      const q = new URLSearchParams(location.search).get("turn");
+      if (q) localStorage.setItem("neonbay-turn", q);
+      const v = q || localStorage.getItem("neonbay-turn");
+      if (v) { const [u, user, pass] = v.split(","); if (/^turns?:/.test(u)) out.push({ urls: u, username: user || "", credential: pass || "" }); }
+    } catch (e) { /* storage blocked */ }
+    return out;
+  }
+  const ICE = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] }, ...TURN, ...userTurn()];
+  G.ICE_SERVERS = ICE; G.P2P_HAS_TURN = ICE.length > 1;
   const MAX = 16, TICK = 50;
   const COLORS = ["#22d3ee", "#ff3df2", "#ffd60a", "#19f5a0", "#ff7b00", "#c77dff", "#4cc9f0", "#ff4d6d", "#a3e635", "#f472b6", "#60a5fa", "#facc15", "#34d399", "#fb7185", "#818cf8", "#fdba74"];
   let libP = null;
@@ -50,7 +63,7 @@
       const peer = (this.peer = new Peer(this.opts()));
       peer.on("open", () => {
         const conn = (this.conn = peer.connect(this.hostId, { reliable: true, serialization: "raw" }));
-        const to = setTimeout(() => { if (this.readyState !== 1) { peer.destroy(); this.claimHost(); } }, 12000);
+        const to = setTimeout(() => { if (this.readyState !== 1) { this.unreachable = true; peer.destroy(); this.claimHost(); } }, 12000);
         conn.on("open", () => { clearTimeout(to); this._open(); });
         conn.on("data", (d) => this._deliver(typeof d === "string" ? d : new TextDecoder().decode(d)));
         conn.on("close", () => this._close()); conn.on("error", () => this._close());
