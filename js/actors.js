@@ -37,7 +37,8 @@
       state: "walk", speed: rand(36, 62), bx, by, s, dir: Math.random() < 0.5 ? 1 : -1, off: rand(-14, 14), timer: 0, bubble: 0 };
   }
   G.makePed = makePed;
-  function blockOfPoint(x, y) { return [clamp(Math.floor((x / T - 4) / 12), 0, 6), clamp(Math.floor((y / T - 4) / 12), 0, 6)]; }
+  function blockOfPoint(x, y) { return [clamp(Math.floor((x / T - 4) / 12), 0, W.NB - 1), clamp(Math.floor((y / T - 4) / 12), 0, W.NB - 1)]; }
+  const isBlock = (bx, by) => !!W.blockAt(bx, by); // a city block (pedestrians only walk around those)
 
   G.updatePed = function (p, dt) {
     p.bubble = Math.max(0, p.bubble - dt);
@@ -71,7 +72,7 @@
       const cx = Math.abs(p.x - r.x0) < Math.abs(p.x - r.x1) ? -1 : 1, cy = Math.abs(p.y - r.y0) < Math.abs(p.y - r.y1) ? -1 : 1;
       const horiz = Math.random() < 0.5;
       const nbx = p.bx + (horiz ? cx : 0), nby = p.by + (horiz ? 0 : cy);
-      if (nbx >= 0 && nbx <= 6 && nby >= 0 && nby <= 6) {
+      if (isBlock(nbx, nby)) {
         const nr = ringBounds(nbx, nby);
         p.state = "cross"; p.nbx = nbx; p.nby = nby;
         p.tx = horiz ? (cx < 0 ? nr.x1 : nr.x0) : p.x; p.ty = horiz ? p.y : cy < 0 ? nr.y1 : nr.y0;
@@ -105,7 +106,7 @@
       return Math.abs(-rx * fy + ry * fx) < 24;
     };
     for (const o of G.activeCars) if (o !== car && check(o.x, o.y)) return o;
-    if (!P.car && check(P.x, P.y)) return P;
+    if (!P.car && !P.ride && check(P.x, P.y)) return P;
     for (const p of G.peds) if ((p.state === "cross" || p.state === "flee") && check(p.x, p.y)) return p;
     return null;
   }
@@ -258,7 +259,8 @@
     // pedestrians
     if (G.peds.length < G.settings.peds) {
       const [pbx, pby] = blockOfPoint(tgt.x, tgt.y);
-      const bx = clamp(pbx + randi(-2, 2), 0, 6), by = clamp(pby + randi(-2, 2), 0, 6);
+      const bx = pbx + randi(-2, 2), by = pby + randi(-2, 2);
+      if (!isBlock(bx, by)) return;
       const p = makePed(bx, by, rand(4 * 9 * T));
       const [x, y] = ringPos(p); p.x = x; p.y = y;
       const d = dist(x, y, tgt.x, tgt.y);
@@ -268,8 +270,9 @@
   G.populateInitial = function () {
     const tgt = P.car || P;
     for (let i = 0; i < 60; i++) {
-      const [pbx, pby] = blockOfPoint(tgt.x, tgt.y);
-      const p = makePed(clamp(pbx + randi(-2, 2), 0, 6), clamp(pby + randi(-2, 2), 0, 6), rand(4 * 9 * T));
+      const [pbx, pby] = blockOfPoint(tgt.x, tgt.y), bx = pbx + randi(-2, 2), by = pby + randi(-2, 2);
+      if (!isBlock(bx, by)) continue;
+      const p = makePed(bx, by, rand(4 * 9 * T));
       const [x, y] = ringPos(p); p.x = x; p.y = y;
       if (dist(x, y, tgt.x, tgt.y) < 1500 && dist(x, y, tgt.x, tgt.y) > 120) G.peds.push(p);
     }
@@ -295,7 +298,9 @@
     } else if (best.driver === "police") { G.crime(2, "Stole a police car"); }
     else G.audio.sfx("door");
     best.driver = "player"; best.siren = false; best.ai = null; best.keep = true; best.copLeaving = false;
+    best.manual = !!G.settings.manual && !best.s.pedal; best.gear = 1; best.shiftT = 0;
     P.car = best; G.heroes.reset(); G.events.push({ type: "enterCar", car: best });
+    if (best.manual && !G.state.manualTip) { G.state.manualTip = true; G.ui.toast(`Manual gearbox: ${G.controls.label("gearUp")} shift up · ${G.controls.label("gearDn")} shift down · go below 1st for N, then R`, "#ffd60a"); }
     return true;
   };
   G.exitCar = function () {
@@ -303,18 +308,29 @@
     const lx = -Math.sin(c.a), ly = Math.cos(c.a);
     let x = c.x - lx * 30, y = c.y - ly * 30;
     if (W.pointBlocked(x, y, 8)) { x = c.x + lx * 30; y = c.y + ly * 30; }
-    P.x = x; P.y = y; c.driver = null; c.ctrl = { t: 0, s: 0, hb: true, boost: false }; P.car = null; G.heroes.reset(); P.vx = P.vy = 0;
+    P.x = x; P.y = y; c.driver = null; c.ctrl = { t: 0, s: 0, hb: true, boost: false }; c.manual = false; P.car = null; G.heroes.reset(); P.vx = P.vy = 0;
     G.audio.sfx("door"); G.events.push({ type: "exitCar", car: c });
   };
   G.updatePlayer = function (dt) {
     P.hitCd = Math.max(0, P.hitCd - dt);
+    if (P.ride) { P.anim = { mode: "sit", speed: 0 }; return; } // passenger in a friend's car: net.js moves us
     if (P.car) {
       const c = P.car, k = c.ctrl;
       if (c.wrecked) { G.exitCarForce(); return; }
       k.t = Input.down("KeyW", "ArrowUp") ? 1 : Input.down("KeyS", "ArrowDown") ? -1 : 0;
       k.s = (Input.down("KeyD", "ArrowRight") ? 1 : 0) - (Input.down("KeyA", "ArrowLeft") ? 1 : 0);
       k.hb = Input.down("Space");
-      k.boost = Input.down("ShiftLeft", "ShiftRight") && P.nitro > 0.02 && k.t > 0;
+      k.boost = Input.down("ShiftLeft", "ShiftRight") && P.nitro > 0.02 && k.t > 0 && !c.s.pedal;
+      c.manual = !!G.settings.manual && !c.s.pedal;
+      if (c.manual) {
+        const up = Input.hit("A_gearUp"), dn = Input.hit("A_gearDn");
+        if (up || dn) {
+          const r = c.shift(up ? 1 : -1);
+          if (r === true) G.audio.sfx("shift");
+          else if (r === "overrev") { G.audio.sfx("fail"); G.ui.toast("Too fast for that gear: it would over-rev", "#ff4d6d"); }
+          else if (r === "moving") G.ui.toast("Stop before selecting reverse", "#ff4d6d");
+        }
+      }
       P.nitro = clamp(P.nitro + (k.boost ? -0.38 : 0.07) * dt, 0, 1);
       P.x = c.x; P.y = c.y; P.a = c.a;
       if (Input.hit("KeyH")) { G.audio.sfx("horn"); for (const p of G.peds) if (dist(p.x, p.y, c.x, c.y) < 160) G.scarePed(p, c.x, c.y); }
@@ -324,7 +340,7 @@
   };
   G.exitCarForce = function () {
     const c = P.car; if (!c) return;
-    P.x = c.x - Math.sin(c.a) * 34; P.y = c.y + Math.cos(c.a) * 34; c.driver = null; P.car = null; G.heroes.reset(); P.vx = P.vy = 0;
+    P.x = c.x - Math.sin(c.a) * 34; P.y = c.y + Math.cos(c.a) * 34; c.driver = null; c.manual = false; P.car = null; G.heroes.reset(); P.vx = P.vy = 0;
     P.hp -= 20; G.shake(14);
   };
 })();

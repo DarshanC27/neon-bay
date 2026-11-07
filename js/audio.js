@@ -41,6 +41,10 @@
   // a bouncing rev limiter, and a bit of wheelspin flare when the tyres are sliding. Used for my car and other players'.
   const RATIOS = [0, 0.16, 0.31, 0.47, 0.63, 0.8, 1.02];
   A.engineNote = function (c, dt) {
+    if (c.manual && c.rpm) { // the real gearbox drives the sound
+      const sh = c.shiftT > 0 ? c.shiftT : 0, bounce = c.limiter > 0 ? Math.abs(Math.sin(G.time * 40)) * 300 : 0, rpm = c.rpm - bounce;
+      return { f: (rpm / 60) * 2 * 0.8, rpm01: (rpm - 900) / 6300, load: clamp(Math.abs(c.ctrl.t || 0), 0, 1), shift: sh, gear: c.gear };
+    }
     const st = c._eng || (c._eng = { gear: 1, rpm: 900, shift: 0 });
     const max = c.s.max * (c.ctrl.boost ? 1.32 : 1), sp = Math.abs(c.vF || c.speed || 0), k = sp / max;
     let g = st.gear;
@@ -64,7 +68,7 @@
   A.update = function (dt) {
     if (!A.ctx) return;
     const t = A.ctx.currentTime, P = G.player, c = P.car;
-    if (c && !c.wrecked) {
+    if (c && !c.wrecked && !c.s.pedal) {
       const e = A.engineNote(c, dt);
       eng.o1.frequency.setTargetAtTime(e.f, t, 0.03); eng.o2.frequency.setTargetAtTime(e.f * 0.5, t, 0.03);
       eng.lp.frequency.setTargetAtTime(300 + e.load * 1500 + e.rpm01 * 900 + (c.ctrl.boost ? 900 : 0), t, 0.06);
@@ -98,6 +102,7 @@
     switch (name) {
       case "crash": noise(0.4 * v + 0.1, 0.5 * v, 900); tone(90, 0.25, "sine", 0.4 * v, -50); break;
       case "door": noise(0.08, 0.3, 700); tone(160, 0.08, "square", 0.08); break;
+      case "shift": noise(0.05, 0.22, 500); tone(110, 0.06, "square", 0.06); break;
       case "horn": tone(330, 0.35, "square", 0.12); tone(415, 0.35, "square", 0.1); break;
       case "cash": [988, 1319].forEach((f, i) => tone(f, 0.18, "square", 0.08, 0, i * 0.07)); break;
       case "success": [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.35, "triangle", 0.18, 0, i * 0.08)); break;

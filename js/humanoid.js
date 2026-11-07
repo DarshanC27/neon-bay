@@ -161,6 +161,24 @@
   };
   GAIT.flee = Object.assign({}, GAIT.run, { lean: -0.08, arm: 0.4 });
   const GROUND = { walk: 1, run: 1, sprint: 1, flee: 1, idle: 1, wait: 1, wave: 1, stagger: 1 };
+  const SEAT = { sit: 1, ride: 1, pedal: 1, pillion: 1 };
+  // seated: driving a car, riding a motorbike (tucked, hands on the bars), pedalling a bicycle, or riding pillion
+  function seated(R, S, m, sp, dt) {
+    const L = R.L, Rr = R.R, both = (f) => { f(L, 1); f(Rr, -1); };
+    if (m === "sit") {
+      both((s, sd) => { s.hp.rotation.z = 1.45; s.kn.rotation.z = -1.35; s.ft.rotation.z = 0.25; s.sh.rotation.z = 1.05; s.el.rotation.z = 0.55; s.sh.rotation.x = -sd * 0.22; });
+      R.torso.rotation.z = 0.14; R.head.rotation.z = -0.08;
+    } else if (m === "ride" || m === "pillion") {
+      const p = m === "pillion";
+      both((s, sd) => { s.hp.rotation.z = p ? 1.25 : 1.15; s.kn.rotation.z = -2.05; s.ft.rotation.z = 0.7; s.hp.rotation.x = sd * 0.12; s.sh.rotation.z = p ? 0.6 : 1.2; s.el.rotation.z = p ? 0.9 : 0.35; s.sh.rotation.x = -sd * (p ? 0.35 : 0.12); });
+      R.torso.rotation.z = p ? -0.3 : -0.62; R.head.rotation.z = p ? 0.15 : 0.5;
+    } else { // pedal: legs turn the cranks, a little body rock
+      S.phase += dt * clamp(sp * 0.085, 0, 11);
+      const ph = S.phase;
+      both((s, sd) => { const q = ph + (sd > 0 ? 0 : Math.PI); s.hp.rotation.z = 1.05 + 0.42 * sin(q); s.kn.rotation.z = -1.25 - 0.55 * cos(q); s.ft.rotation.z = 0.35 + 0.2 * sin(q); s.sh.rotation.z = 0.95; s.el.rotation.z = 0.35; s.sh.rotation.x = -sd * 0.1; });
+      R.torso.rotation.z = -0.38; R.torso.rotation.x = sin(ph) * 0.05 * clamp(sp / 60, 0, 1); R.head.rotation.z = 0.3;
+    }
+  }
   const HIPS_REST = 9.6, LEG_REST = 9.95; // pelvis height, hip-pivot-to-sole length
 
   function reset(R) {
@@ -262,7 +280,8 @@
     reset(R);
     const L = R.L, Rr = R.R, m = a.mode || "idle", sp = a.speed || 0;
     let rate = 12, poseRate = 12, snapPose = false;
-    if (GAIT[m]) {
+    if (SEAT[m]) { rate = 16; seated(R, S, m, sp, dt); }
+    else if (GAIT[m]) {
       rate = 22;
       gait(R, S, m, sp, dt);
       if (m === "flee") { // panicked: hands up by the head, looking back

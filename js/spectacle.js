@@ -5,7 +5,7 @@
   let scene, ready = false, fwLight, fwK = 0;
   const gulls = [], boats = [], balloons = [], lights = [], boards = [], beams = [];
   let wheel, blimp, blimpTex, blimpCtx, plane, planeT = 20;
-  const CENTER = W.SIZE / 2;
+  const CENTER = 48 * G.TILE; // Neon Bay's centre (the region is much bigger now)
   const mat = (color, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.6, metalness: 0.1 }, o));
   const glowMat = (color) => new THREE.MeshBasicMaterial({ color, toneMapped: false });
   function canvas(w, h) { const c = document.createElement("canvas"); c.width = w; c.height = h; return [c, c.getContext("2d")]; }
@@ -211,8 +211,10 @@
     // boats + wakes
     const tg = G.cam3 ? G.cam3.tgt : { x: P.x, z: P.y };
     for (const b of boats) {
-      b.ang += b.sp * dt; const x = CENTER + Math.cos(b.ang) * (b.rx - CENTER), y = CENTER + Math.sin(b.ang) * (b.ry - CENTER);
-      const dx = -Math.sin(b.ang) * Math.sign(b.sp), dy = Math.cos(b.ang) * Math.sign(b.sp);
+      // a rounded-square loop through the water ring around Neon Bay (the mainland is just beyond it now)
+      b.ang += b.sp * dt; const se = (v) => Math.sign(v) * Math.pow(Math.abs(v), 0.25), Rb = 3300 + (b.rx - CENTER - 3600) * 0.3;
+      const x = CENTER + se(Math.cos(b.ang)) * Rb, y = CENTER + se(Math.sin(b.ang)) * Rb;
+      let dx = x - (b.px ?? x), dy = y - (b.py ?? y); const dl = Math.hypot(dx, dy); if (dl > 1e-4) { dx /= dl; dy /= dl; b.hd = [dx, dy]; } else [dx, dy] = b.hd || [1, 0]; b.px = x; b.py = y;
       b.g.position.set(x, Math.sin(time * 1.6 + b.ang * 10) * 2, y); b.g.rotation.y = -Math.atan2(dy, dx); b.g.rotation.z = Math.sin(time * 1.2 + b.ang * 7) * 0.05;
       b.glass.material.emissiveIntensity = n01 * 1.5;
       if (Math.random() < 0.5 && Math.abs(x - tg.x) < 1800 && Math.abs(y - tg.z) < 1800) G.spawnFx("smoke", x - dx * 50, y - dy * 50, { z: 2, vx: -dx * 30 + rand(-15, 15), vy: -dy * 30 + rand(-15, 15), vz: 2, size: 6, life: 1.6, max: 1.6, color: "#e8f6ff" });
