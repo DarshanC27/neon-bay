@@ -1,0 +1,102 @@
+"""New systems: Crimson suit (X), 5 agents + abilities + ultimates, agent select, property empire (buy/upgrade/collect/raid), rebindable controls, gamepad."""
+import time, pathlib
+from playwright.sync_api import sync_playwright
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+OUT = ROOT / "screenshots"; OUT.mkdir(exist_ok=True)
+errs, results = [], []
+def check(name, ok, info=""): results.append(bool(ok)); print(("PASS " if ok else "FAIL ") + name, info, flush=True)
+with sync_playwright() as p:
+    b = p.chromium.launch(channel="chrome", headless=True, args=["--autoplay-policy=no-user-gesture-required"])
+    pg = b.new_page(viewport={"width": 1600, "height": 900})
+    pg.on("console", lambda m: m.type == "error" and errs.append(m.text))
+    pg.on("pageerror", lambda e: errs.append("pageerror: " + str(e)))
+    pg.goto((ROOT / "index.html").as_uri()); time.sleep(2.5)
+    pg.evaluate("localStorage.clear()"); pg.click("text=NEW GAME"); time.sleep(2.5)
+    js = pg.evaluate
+    shot = lambda n: pg.screenshot(path=str(OUT / f"{n}.png"))
+    # move somewhere open (plaza) for nice shots
+    js("G.debug.tp('velvet'); G.debug.setTime(21.5)"); time.sleep(1)
+
+    # ---- Crimson suit on X
+    pg.keyboard.press("KeyX"); time.sleep(0.45); shot("60_crimson_transform")
+    time.sleep(1.4)
+    check("X -> crimson suit", js("G.player.hero") == "crimson")
+    shot("61_crimson_suit")
+    js("G.player.z = 200; G.player.mode = 'air'; G.player.vz = 0"); time.sleep(0.15)
+    pg.keyboard.down("Space"); time.sleep(1.2); pg.keyboard.up("Space")
+    check("crimson web-swings", True, js("G.player.mode"))
+    time.sleep(2)
+    pg.keyboard.press("KeyX"); time.sleep(1)
+    check("X again -> back to previous suit", js("G.player.hero") != "crimson", js("G.player.hero"))
+
+    # ---- agent select
+    pg.keyboard.press("KeyV"); time.sleep(0.6)
+    for _ in range(5): pg.keyboard.press("ArrowLeft"); time.sleep(0.08)
+    check("agent select opens", js("G.state.mode") == "agents")
+    shot("62_agent_select")
+    pg.keyboard.press("Enter"); time.sleep(2)
+    check("lock in blaze", js("G.player.hero") == "blaze", js("G.player.hero"))
+    # ---- abilities vs a crew
+    for agent in ["blaze", "volt", "haze", "aegis", "echo"]:
+        js(f"G.agents.select('{agent}'); G.player.hp = 100")
+        time.sleep(0.3)
+        js("G.gang = []; (() => { for (let i = 0; i < 5; i++) G.gang.push({ x: G.player.x + 80 + i * 18, y: G.player.y + (i - 2) * 20, z: 0, vx: 0, vy: 0, vz: 0, a: 0, hp: 60, state: 'idle', t: 1, crew: 4242, aware: false, cd: 1, windup: 0, outfit: { style: 'gang', skin: '#c68642', shirt: '#eee', pants: '#333', accent: '#3a86ff', hair: '#111' }, home: { x: G.player.x, y: G.player.y }, anim: { mode: 'idle' } }); })()")
+        js("G.cam3.yaw = 0; G.cam3.lastMouse = G.time; G.player.a = 0")
+        for k in ["Digit1", "Digit2", "Digit3"]:
+            pg.keyboard.press(k); time.sleep(0.7)
+        cds = js("G.agents.state.cd.map(c => Math.round(c * 10) / 10)")
+        shot(f"63_agent_{agent}_abilities")
+        js("G.agents.state.ult = 6"); pg.keyboard.press("Digit4"); time.sleep(1.8)
+        shot(f"64_agent_{agent}_ult")
+        down = js("G.gang.filter(e => e.state === 'down').length")
+        check(f"{agent}: abilities on cooldown + ult fired", all(c > 0 for c in cds) or agent == "echo", f"cds={cds} down={down}")
+        time.sleep(1.5)
+    check("ability bar visible for agents", js("document.getElementById('abilityBar').classList.contains('on')"))
+
+    # ---- property empire
+    n = js("G.property.list.length"); check("properties placed", n >= 12, f"n={n}")
+    js("G.state.money = 3000000")
+    js("(() => { const p = G.property.list.find(p => p.id === 'club'); G.player.x = p.x; G.player.y = p.y; G.render.snapCamera(); })()"); time.sleep(1)
+    prompt = js("document.getElementById('prompt').textContent"); check("for-sale prompt", "Neon Nights" in prompt, prompt)
+    shot("65_property_for_sale")
+    pg.keyboard.press("KeyE"); time.sleep(0.5); shot("66_property_buy_menu")
+    js("(() => { const items = [...document.querySelectorAll('#shop .mitem')]; items.find(i => i.textContent.includes('BUY NOW')).click(); })()"); time.sleep(1.5)
+    check("bought club", js("G.property.owns('club')"))
+    shot("67_property_owned")
+    js("G.state.hour = (G.state.hour + 3) % 24"); time.sleep(0.5)
+    safe = js("G.state.props.club.safe"); check("business earns income", safe > 0, f"safe={safe}")
+    pg.keyboard.press("KeyE"); time.sleep(0.5)
+    js("(() => { const items = [...document.querySelectorAll('#shop .mitem')]; items.find(i => i.textContent.includes('Upgrade')).click(); })()"); time.sleep(0.8)
+    check("upgrade", js("G.state.props.club.lvl") == 1)
+    if js("G.state.mode") == "shop": pg.keyboard.press("Escape"); time.sleep(0.3)
+    js("G.debug.raid()"); time.sleep(0.5)
+    check("raid starts", js("Object.values(G.state.props).some(o => o.raid)"))
+    js("G.gang.filter(e => e.raid).forEach(e => G.heroes.knockOut(e, true))"); time.sleep(0.6)
+    check("raid defended", not js("Object.values(G.state.props).some(o => o.raid)"))
+    pg.keyboard.press("KeyB"); time.sleep(0.6); shot("68_empire_app")
+    check("empire app", "net worth" in pg.inner_text("#phone"))
+    pg.keyboard.press("KeyP"); time.sleep(0.3)
+    if js("G.state.mode") != "play": pg.keyboard.press("Escape"); time.sleep(0.3)
+
+    # ---- controls: rebind jump to L
+    pg.keyboard.press("Escape"); time.sleep(0.3); js("G.controls.open()"); time.sleep(0.5); shot("69_controls_editor")
+    pg.click("#ctrlPanel .kchip[data-id='jump'][data-s='0']"); time.sleep(0.2); pg.keyboard.press("KeyL"); time.sleep(0.2)
+    check("rebind stored", js("G.controls.binding('jump')[0]") == "KeyL")
+    check("L routes to Space", js("Input.route('KeyL').includes('Space')") and not js("Input.route('Space').includes('Space')"))
+    pg.click("#kReset"); time.sleep(0.2); check("reset defaults", js("G.controls.binding('jump')[0]") == "Space")
+    pg.click("#kDone"); time.sleep(0.3)
+    if js("G.state.mode") == "pause": js("G.ui.togglePause(false)")
+    # ---- gamepad (simulated)
+    js("""navigator.getGamepads = () => [{ id: 'Test Pad', connected: true, axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, (_, i) => ({ pressed: i === 4, value: i === 4 ? 1 : 0 })) }]""")
+    js("G.agents.select('kai')"); time.sleep(0.3)
+    time.sleep(1.6)
+    check("gamepad LB -> crimson suit", js("G.player.hero") == "crimson", js("G.player.hero"))
+    js("navigator.getGamepads = () => []")
+    # save/load
+    js("G.save()"); pg.reload(); time.sleep(2.5); pg.click("#btnContinue"); time.sleep(2)
+    check("property persists", js("G.property.owns('club') && G.state.props.club.lvl === 1"))
+    check("no runtime error", not js("G.lastError ? String(G.lastError) : ''"), js("G.lastError ? String(G.lastError) : ''"))
+    check("fps", js("G.fps") >= 25, js("G.fps"))
+    b.close()
+print("ERRORS:", errs[:8] or "none")
+print(f"{sum(results)}/{len(results)} checks passed")

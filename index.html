@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Neon Bay">
+<meta name="theme-color" content="#05060b">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌴</text></svg>">
+<title>NEON BAY · open city</title>
+<style>
+  :root { --pink:#ff3df2; --cyan:#22d3ee; --gold:#ffd60a; --ok:#19f5a0; --bad:#ff4d6d; --violet:#c77dff; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:#05060b; overflow:hidden; font-family:"Bahnschrift","Segoe UI",system-ui,sans-serif; color:#fff; user-select:none; }
+  canvas#game { position:fixed; inset:0; display:block; }
+  .hud { position:fixed; inset:0; pointer-events:none; opacity:0; transition:opacity .6s; }
+  .hud.on { opacity:1; }
+  .shadow { text-shadow:0 2px 0 #000, 0 0 12px rgba(0,0,0,.8); }
+  /* top right */
+  .tr { position:absolute; top:18px; right:24px; text-align:right; }
+  .row1 { display:flex; gap:14px; justify-content:flex-end; align-items:center; font-size:20px; }
+  #clock { font-variant-numeric:tabular-nums; letter-spacing:1px; }
+  #money { font-size:40px; font-weight:800; color:#7dffa8; letter-spacing:1px; font-variant-numeric:tabular-nums; -webkit-text-stroke:1px #0b3d1f; }
+  #stars { font-size:30px; letter-spacing:4px; }
+  #stars span { color:rgba(255,255,255,.18); -webkit-text-stroke:1px rgba(0,0,0,.6); }
+  #stars span.on { color:#ffd60a; text-shadow:0 0 12px #ffd60a; }
+  #stars span.blink { color:#5a4a10; }
+  #timer { font-size:30px; font-weight:800; margin-top:4px; color:#fff; }
+  #timer.urgent { color:var(--bad); animation:pulse .6s infinite; }
+  @keyframes pulse { 50% { transform:scale(1.08); } }
+  /* minimap */
+  .mmwrap { position:absolute; left:22px; bottom:22px; width:250px; }
+  #minimap { width:250px; height:250px; border-radius:50%; box-shadow:0 0 0 3px rgba(0,0,0,.6), 0 10px 40px rgba(0,0,0,.6), 0 0 30px rgba(199,125,255,.25); background:#0b3d5c; }
+  .bars { margin-top:10px; display:grid; grid-template-columns:30px 1fr; gap:6px 8px; align-items:center; font-size:11px; letter-spacing:1px; color:#cfd3e6; }
+  .bar { height:8px; background:rgba(0,0,0,.55); border-radius:4px; overflow:hidden; box-shadow:0 0 0 1px rgba(255,255,255,.12); }
+  .bar i { display:block; height:100%; background:var(--ok); transition:width .2s; }
+  #nitrobar { background:linear-gradient(90deg,#22d3ee,#c77dff); }
+  #gpsdist { position:absolute; left:50%; top:206px; transform:translateX(-50%); font-size:13px; color:#e9d5ff; background:rgba(0,0,0,.55); padding:1px 8px; border-radius:8px; }
+  #district { position:absolute; left:26px; bottom:330px; font-size:30px; font-weight:800; letter-spacing:2px; opacity:0; font-style:italic; color:#fff; }
+  #district.show { animation:distIn 4s forwards; }
+  @keyframes distIn { 0% { opacity:0; transform:translateX(-20px); } 10%,75% { opacity:1; transform:none; } 100% { opacity:0; } }
+  /* speedo */
+  #speedoWrap { position:absolute; right:22px; bottom:16px; width:210px; text-align:center; opacity:0; transform:translateY(30px); transition:.35s; }
+  #speedoWrap.on { opacity:1; transform:none; }
+  #speedo { width:210px; height:210px; }
+  #carname { margin-top:-18px; font-size:14px; letter-spacing:3px; color:#cfd3e6; text-transform:uppercase; }
+  /* center texts */
+  #objective { position:absolute; left:50%; bottom:36px; transform:translateX(-50%); max-width:70vw; padding:10px 22px; font-size:19px; background:rgba(5,6,14,.72); border:1px solid rgba(255,255,255,.12); border-radius:12px; opacity:0; transition:.3s; text-align:center; }
+  #objective.on { opacity:1; }
+  #prompt { position:absolute; left:50%; bottom:96px; transform:translateX(-50%) scale(.9); padding:9px 18px; font-size:17px; background:rgba(255,255,255,.92); color:#111; border-radius:10px; font-weight:700; opacity:0; transition:.2s; white-space:nowrap; }
+  #prompt.on { opacity:1; transform:translateX(-50%) scale(1); }
+  #banner { position:absolute; left:0; right:0; top:30%; text-align:center; opacity:0; }
+  #banner.show { animation:bannerIn 3.6s forwards; }
+  #banner .bt { font-size:74px; font-weight:900; letter-spacing:6px; font-style:italic; -webkit-text-stroke:2px rgba(0,0,0,.5); }
+  #banner .bs { font-size:22px; margin-top:6px; color:#fff; text-shadow:0 2px 6px #000; }
+  @keyframes bannerIn { 0% { opacity:0; transform:scale(1.6); filter:blur(6px); } 10% { opacity:1; transform:scale(1); filter:none; } 80% { opacity:1; } 100% { opacity:0; transform:scale(.96); } }
+  #bigcount { position:absolute; left:0; right:0; top:34%; text-align:center; font-size:150px; font-weight:900; color:var(--gold); text-shadow:0 0 40px var(--gold), 0 6px 0 #000; opacity:0; }
+  #bigcount.show { animation:countIn .95s forwards; }
+  @keyframes countIn { 0% { opacity:0; transform:scale(2.2); } 20% { opacity:1; transform:scale(1); } 100% { opacity:0; transform:scale(.8); } }
+  #radio { position:absolute; left:50%; top:18px; transform:translateX(-50%); padding:8px 20px; border-radius:20px; background:rgba(5,6,14,.8); border:1px solid var(--violet); color:#e9d5ff; font-size:16px; letter-spacing:1px; opacity:0; }
+  #radio.show { animation:distIn 3s forwards; }
+  #toasts { position:absolute; left:22px; top:18px; display:flex; flex-direction:column; gap:8px; max-width:420px; }
+  .toast { background:rgba(5,6,14,.85); border-left:4px solid #fff; padding:9px 14px; border-radius:6px; font-size:15px; animation:toastIn .3s; transition:.4s; }
+  .toast.out { opacity:0; transform:translateX(-20px); }
+  @keyframes toastIn { from { opacity:0; transform:translateX(-20px); } }
+  #fps { position:absolute; right:8px; bottom:4px; font-size:11px; color:rgba(255,255,255,.35); }
+  /* dialog */
+  #dialog { position:fixed; left:0; right:0; bottom:0; height:0; background:linear-gradient(transparent, rgba(0,0,0,.92) 30%); transition:height .4s; overflow:hidden; pointer-events:auto; }
+  #dialog::before { content:""; position:fixed; left:0; right:0; top:0; height:0; background:#000; transition:height .4s; }
+  #dialog.on { height:220px; } #dialog.on::before { height:70px; }
+  .dlgin { position:absolute; left:50%; bottom:36px; transform:translateX(-50%); width:min(900px, 92vw); display:flex; gap:20px; align-items:flex-start; }
+  #dlgFace { font-size:64px; width:90px; height:90px; display:grid; place-items:center; background:rgba(255,255,255,.08); border-radius:18px; border:2px solid var(--pink); flex:none; }
+  #dlgWho { font-size:20px; font-weight:800; color:var(--pink); letter-spacing:3px; text-transform:uppercase; }
+  #dlgText { font-size:23px; line-height:1.4; margin-top:6px; min-height:64px; }
+  .dlghint { font-size:12px; color:#999; margin-top:6px; letter-spacing:1px; }
+  /* overlays */
+  .overlay { position:fixed; inset:0; display:none; pointer-events:auto; }
+  .overlay.on { display:block; }
+  #map canvas { position:absolute; inset:0; cursor:crosshair; }
+  /* phone */
+  #phone { position:fixed; right:40px; bottom:-700px; width:330px; height:620px; border-radius:42px; background:#0a0c14; border:3px solid #2b3045; box-shadow:0 30px 80px rgba(0,0,0,.7), 0 0 40px rgba(199,125,255,.3); transition:bottom .35s cubic-bezier(.2,1.2,.4,1); pointer-events:auto; padding:16px; }
+  #phone.on { bottom:40px; }
+  .pscreen { height:100%; border-radius:30px; background:linear-gradient(160deg,#2a1450,#0b1d3a 60%,#05060b); padding:24px 18px; overflow:hidden; }
+  .pbar { display:flex; justify-content:space-between; font-size:13px; color:#cfd3e6; margin-bottom:18px; }
+  .ptitle { font-size:26px; font-weight:800; letter-spacing:2px; margin-bottom:18px; background:linear-gradient(90deg,var(--pink),var(--cyan)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  #phoneApps { display:grid; grid-template-columns:repeat(3,1fr); gap:18px 10px; }
+  .app { text-align:center; font-size:12.5px; cursor:pointer; padding:6px 0; border-radius:14px; }
+  .app .ai { font-size:30px; width:62px; height:62px; margin:0 auto 6px; border-radius:18px; display:grid; place-items:center; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.12); }
+  .app.sel .ai, .app:hover .ai { background:rgba(199,125,255,.3); border-color:var(--violet); box-shadow:0 0 18px rgba(199,125,255,.5); }
+  .phint { position:absolute; bottom:34px; left:0; right:0; text-align:center; font-size:11px; color:#888; }
+  .mtitle { font-size:22px; font-weight:800; letter-spacing:2px; margin-bottom:12px; color:#fff; }
+  .mlist { display:flex; flex-direction:column; gap:6px; max-height:470px; overflow:auto; }
+  .mitem { display:flex; justify-content:space-between; gap:10px; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,.05); cursor:pointer; font-size:14.5px; border:1px solid transparent; }
+  .mitem.sel { background:rgba(199,125,255,.22); border-color:var(--violet); }
+  .mitem.dis { opacity:.5; cursor:default; }
+  .mitem .mr { color:var(--gold); white-space:nowrap; }
+  .mitem small { color:#aab; }
+  /* shop */
+  #shop .box { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:min(560px,92vw); background:rgba(8,10,20,.94); border:1px solid rgba(255,255,255,.15); border-radius:20px; padding:24px 26px; box-shadow:0 0 60px rgba(255,61,242,.25); }
+  #shop .mlist { max-height:60vh; }
+  /* title */
+  #title { position:fixed; inset:0; z-index:20; pointer-events:auto; background:radial-gradient(ellipse at 50% 120%, rgba(255,61,242,.35), transparent 60%), linear-gradient(180deg, rgba(5,6,11,.2), rgba(5,6,11,.85)); display:none; }
+  #title.on { display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .sun { width:300px; height:150px; border-radius:300px 300px 0 0; background:repeating-linear-gradient(180deg, #ffd60a 0 14px, #ff3df2 14px 16px, #ff7b00 16px 30px, transparent 30px 34px); background:linear-gradient(180deg,#ffd60a,#ff3df2); -webkit-mask:repeating-linear-gradient(180deg,#000 0 18px, transparent 18px 24px); mask:repeating-linear-gradient(180deg,#000 0 18px, transparent 18px 24px); filter:drop-shadow(0 0 30px #ff3df2); margin-bottom:-30px; }
+  .logo { font-size:120px; font-weight:900; font-style:italic; letter-spacing:10px; line-height:1; background:linear-gradient(180deg,#fff 10%,#22d3ee 50%,#c77dff 90%); -webkit-background-clip:text; background-clip:text; color:transparent; filter:drop-shadow(0 0 24px rgba(34,211,238,.6)) drop-shadow(0 6px 0 #2a0b3d); }
+  .tag { letter-spacing:12px; color:#ffd6f5; margin:10px 0 40px; font-size:16px; text-shadow:0 0 12px var(--pink); }
+  .tbtn { pointer-events:auto; width:300px; padding:15px; margin:7px; border-radius:14px; border:2px solid rgba(255,255,255,.2); background:rgba(10,12,24,.7); color:#fff; font:inherit; font-size:20px; letter-spacing:4px; cursor:pointer; transition:.15s; }
+  .tbtn:hover { border-color:var(--pink); box-shadow:0 0 30px rgba(255,61,242,.5); transform:scale(1.04); }
+  .tbtn.main { background:linear-gradient(90deg,#ff3df2,#c77dff,#22d3ee); color:#05060b; font-weight:900; border:none; }
+  /* online */
+  .mppanel { display:none; position:absolute; right:40px; top:50%; transform:translateY(-50%); width:360px; padding:20px; border-radius:16px; background:rgba(8,10,22,.92); border:2px solid var(--cyan); box-shadow:0 0 40px rgba(34,211,238,.35); pointer-events:auto; text-align:left; }
+  .mppanel.on { display:block; }
+  .mph { font-size:22px; font-weight:900; letter-spacing:3px; margin-bottom:12px; color:var(--cyan); }
+  .mppanel label { display:block; font-size:13px; letter-spacing:1px; color:#cfd3e6; margin:8px 0; }
+  .mppanel input { display:block; width:100%; margin-top:4px; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.25); background:#0b0e1c; color:#fff; font:inherit; font-size:17px; user-select:text; }
+  .mprow { display:flex; gap:8px; margin-top:12px; }
+  .mpb { flex:1; padding:11px; border-radius:10px; border:1px solid rgba(255,255,255,.25); background:#141833; color:#fff; font:inherit; font-size:15px; letter-spacing:2px; cursor:pointer; }
+  .mpb.main { background:linear-gradient(90deg,#22d3ee,#c77dff); color:#05060b; font-weight:900; border:none; }
+  .mpb:disabled { opacity:.4; cursor:default; }
+  .mpstatus { margin-top:12px; font-size:14px; line-height:1.4; color:#e9ecef; }
+  .mpstatus code { color:var(--gold); }
+  .mphint { font-size:12px; color:#8d99ae; margin-top:8px; line-height:1.35; }
+  .mpbox { display:none; position:absolute; right:24px; top:215px; width:230px; padding:8px 10px; border-radius:10px; background:rgba(5,6,14,.7); border:1px solid rgba(255,255,255,.12); font-size:14px; pointer-events:auto; cursor:pointer; }
+  .mpbox.on { display:block; }
+  .mpt { font-size:11px; letter-spacing:2px; color:#8d99ae; margin-bottom:4px; }
+  .mpp { display:flex; align-items:center; gap:7px; padding:3px 4px; border-radius:6px; }
+  .mpp i { width:10px; height:10px; border-radius:50%; flex:none; }
+  .mpp span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mpp em { font-style:normal; font-size:11px; color:#adb5bd; }
+  .mpp.talk { background:rgba(25,245,160,.18); box-shadow:inset 0 0 0 1px #19f5a0; }
+  .mpk { font-size:10px; color:#6c757d; margin-top:5px; letter-spacing:.5px; }
+  .mpchat { position:absolute; left:22px; bottom:380px; width:400px; pointer-events:none; }
+  .mpline { font-size:15px; padding:3px 8px; margin-top:3px; background:rgba(5,6,14,.6); border-radius:6px; transition:opacity 1s; text-shadow:0 1px 2px #000; }
+  .mpline.old { opacity:0; }
+  .mpchat.typing .mpline { opacity:1; }
+  .mpchat input { display:none; width:100%; margin-top:6px; padding:9px 12px; border-radius:8px; border:1px solid var(--cyan); background:rgba(5,6,14,.9); color:#fff; font:inherit; font-size:15px; pointer-events:auto; user-select:text; }
+  .mpchat.typing input { display:block; }
+  .credit { position:absolute; bottom:18px; color:rgba(255,255,255,.4); font-size:12px; letter-spacing:2px; }
+  #pause .box, #help .box { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); background:rgba(8,10,20,.95); border:1px solid rgba(255,255,255,.15); border-radius:22px; padding:30px 36px; text-align:center; }
+  #pause, #help { background:rgba(0,0,0,.55); backdrop-filter:blur(4px); z-index:30; }
+  .ptitle2 { font-size:44px; font-weight:900; letter-spacing:8px; margin-bottom:18px; font-style:italic; }
+  .keys { display:grid; grid-template-columns:auto auto; gap:8px 26px; text-align:left; font-size:15px; margin:10px 0 20px; }
+  kbd { display:inline-block; min-width:26px; padding:2px 8px; border-radius:6px; background:#1b2140; border:1px solid #39406a; color:#e9d5ff; font-family:Consolas,monospace; font-size:13px; text-align:center; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="vignette" style="position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.5));opacity:.55"></div>
+<div id="flash" style="position:fixed;inset:0;pointer-events:none;background:#e6f0ff;opacity:0"></div>
+<div class="hud shadow" id="hud">
+  <div class="tr">
+    <div class="row1"><span id="weather">☀️</span><span id="clock">18:00</span></div>
+    <div id="money">$0</div>
+    <div id="stars"></div>
+    <div id="timer"></div>
+  </div>
+  <div id="toasts"></div>
+  <div id="radio"></div>
+  <div id="district"></div>
+  <div class="mmwrap">
+    <canvas id="minimap" width="250" height="250"></canvas>
+    <div id="gpsdist"></div>
+    <div class="bars"><span id="hplabel">HP</span><div class="bar"><i id="hpbar"></i></div><span>NOS</span><div class="bar"><i id="nitrobar"></i></div></div>
+  </div>
+  <div id="speedoWrap"><canvas id="speedo" width="210" height="210"></canvas><div id="carname"></div></div>
+  <div id="prompt"></div>
+  <div id="objective"></div>
+  <div id="banner"></div>
+  <div id="bigcount"></div>
+  <div id="fps"></div>
+  <div id="mousehint" style="position:absolute;right:24px;top:170px;font-size:12px;color:#cfd3e6;background:rgba(5,6,14,.6);padding:4px 10px;border-radius:8px">🖱 Click the game to control the camera with your mouse · Esc frees the cursor</div>
+</div>
+
+<div id="dialog"><div class="dlgin"><div id="dlgFace">🙂</div><div><div id="dlgWho"></div><div id="dlgText"></div><div class="dlghint">E / SPACE / CLICK to continue</div></div></div></div>
+
+<div class="overlay" id="map"><canvas id="mapCanvas"></canvas></div>
+
+<div id="phone"><div class="pscreen">
+  <div class="pbar"><span>BayTel 5G</span><span>🔋 87%</span></div>
+  <div id="phoneHome"><div class="ptitle">BAYPHONE</div><div id="phoneApps"></div></div>
+  <div id="phoneMenu" style="display:none"><div class="mtitle"></div><div class="mlist"></div></div>
+  <div class="phint">Arrows/WASD + Enter · Esc back · P close</div>
+</div></div>
+
+<div class="overlay" id="shop"><div class="box"><div class="mtitle"></div><div class="mlist"></div><div style="color:#888;font-size:12px;margin-top:12px">↑↓ select · Enter buy · Esc leave</div></div></div>
+
+<div class="overlay" id="pause"><div class="box">
+  <div class="ptitle2">PAUSED</div>
+  <button class="tbtn main" onclick="G.ui.togglePause(false)">RESUME</button><br>
+  <button class="tbtn" onclick="G.controls.open()">CONTROLS</button><br>
+  <button class="tbtn" id="pauseSave" onclick="G.save(); this.textContent='Saved ✓'">Save game</button><br>
+  <button class="tbtn" onclick="G.save(); location.reload()">QUIT TO TITLE</button>
+</div></div>
+
+<div class="overlay" id="help"><div class="box">
+  <div class="ptitle2">CONTROLS</div>
+  <div class="keys">
+    <span><kbd>W A S D</kbd> / arrows</span><span>Walk / drive</span>
+    <span><kbd>Shift</kbd></span><span>Run · nitro boost in a car</span>
+    <span><kbd>Space</kbd></span><span>Handbrake (drift!)</span>
+    <span><kbd>F</kbd></span><span>Enter / exit / carjack a car</span>
+    <span><kbd>E</kbd></span><span>Interact: missions, shops, jobs</span>
+    <span><kbd>H</kbd></span><span>Horn</span>
+    <span><kbd>C</kbd></span><span>Change suit: Kai / Spindle / Wraith / Nova</span>
+    <span><kbd>LMB</kbd> / <kbd>J</kbd></span><span>Punch combo</span>
+    <span><kbd>RMB</kbd> / <kbd>K</kbd></span><span>Special power</span>
+    <span><kbd>Space</kbd> on foot</span><span>Jump · hold in air to swing (Spindle) · charge (Nova)</span>
+    <span><kbd>Mouse</kbd></span><span>Click to look around</span>
+    <span><kbd>Q</kbd></span><span>Change radio station</span>
+    <span><kbd>M</kbd></span><span>City map (click to set a waypoint)</span>
+    <span><kbd>P</kbd> / <kbd>Tab</kbd></span><span>Phone: rideshare, races, garage, stats</span>
+    <span><kbd>R</kbd></span><span>Flip the car around when stopped</span>
+    <span><kbd>X</kbd></span><span>Cancel the current job</span>
+    <span><kbd>Mouse wheel</kbd></span><span>Zoom</span>
+    <span><kbd>Esc</kbd></span><span>Pause</span>
+  </div>
+  <div style="color:#aab;max-width:560px;font-size:14px;margin-bottom:16px">Lose the cops by staying out of sight until the stars stop flashing, or get a respray at the Spray Shack. Hit the yellow ramps for stunt cash. Find all 25 hidden neon tokens.</div>
+  <button class="tbtn main" onclick="G.ui.showHelp(false)">GOT IT</button>
+</div></div>
+
+<div id="title" class="on">
+  <div class="sun"></div>
+  <div class="logo">NEON BAY</div>
+  <div class="tag">OPEN CITY · DRIVE · HUSTLE · OWN THE NIGHT</div>
+  <button class="tbtn main" onclick="G.newGame()">NEW GAME</button>
+  <button class="tbtn" id="btnContinue" onclick="G.continueGame()">CONTINUE</button>
+  <button class="tbtn" onclick="G.ui.showHelp(true)">CONTROLS</button>
+  <div class="credit">AN ORIGINAL OPEN-WORLD GAME · BUILT FOR WHACK 2026</div>
+</div>
+
+<script src="lib/three.min.js"></script>
+<script src="js/util.js"></script>
+<script src="js/controls.js"></script>
+<script src="js/touch.js"></script>
+<script src="js/world.js"></script>
+<script src="js/vehicles.js"></script>
+<script src="js/actors.js"></script>
+<script src="js/humanoid.js"></script>
+<script src="js/heroes.js"></script>
+<script src="js/missions.js"></script>
+<script src="js/campaign.js"></script>
+<script src="js/finale.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/render.js"></script>
+<script src="js/spectacle.js"></script>
+<script src="js/agents.js"></script>
+<script src="js/property.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/p2p.js"></script>
+<script src="js/net.js"></script>
+<script src="js/main.js"></script>
+<script>if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});</script>
+<script>G.boot(); setInterval(() => { const f = document.getElementById("fps"); if (f) f.textContent = G.fps + " fps"; }, 1000);</script>
+</body>
+</html>
