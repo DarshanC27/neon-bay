@@ -62,6 +62,7 @@
     ["bSprint", "⚡", "RUN", "ShiftLeft", "mid", 216, 26],
     ["bCar", "🚗", "CAR", "KeyF", "mid", 128, 160],
     ["bUse", "✋", "USE", "KeyE", "mid", 208, 112],
+    ["bGearUp", "▲", "GEAR", "A_gearUp", "mid", 128, 78], ["bGearDn", "▼", "GEAR", "A_gearDn", "mid", 52, 134],
     ["bAb1", "1", "", "A_ab1", "sm", 300, 34], ["bAb2", "2", "", "A_ab2", "sm", 300, 92],
     ["bAb3", "3", "", "A_ab3", "sm", 352, 34], ["bUlt", "★", "ULT", "A_ult", "sm", 352, 92],
   ];
@@ -168,6 +169,7 @@
     $("bJump").innerHTML = inCar ? "<i>🛑</i>BRAKE" : G.heroes && G.heroes.LIST && G.heroes.LIST[P.hero] && G.heroes.LIST[P.hero].swing ? "<i>🕸️</i>SWING" : "<i>⤒</i>JUMP";
     $("bSprint").innerHTML = inCar ? "<i>🔥</i>NITRO" : "<i>⚡</i>RUN";
     $("bPunch").classList.toggle("hide", inCar); $("bSpecial").classList.toggle("hide", inCar);
+    const man = inCar && P.car.manual; $("bGearUp").classList.toggle("hide", !man); $("bGearDn").classList.toggle("hide", !man);
     const pr = document.getElementById("prompt"); $("bUse").classList.toggle("hot", !!(pr && pr.textContent.trim() && getComputedStyle(pr).opacity !== "0"));
     const ab = document.getElementById("abilityBar"), agent = !!(ab && ab.classList.contains("on")) && !inCar;
     for (const id of ["bAb1", "bAb2", "bAb3", "bUlt"]) $(id).classList.toggle("hide", !agent);

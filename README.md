@@ -12,7 +12,8 @@ JavaScript with a bundled copy of Three.js (`lib/`): no install, no build step, 
 - **Street fights:** Saltwater Boys gangs on rooftops and street corners, punch combos, knockouts, crew-clear bonuses
 - **3D city:** chase camera with mouse look, animated characters, cars with spinning wheels and suspension, day/night lighting,
   neon, rain, a searchlight helicopter
-- **Drive anything:** 8 cars with drift physics (handbrake), nitro, damage, smoke and wrecks. Carjack traffic or steal a police car.
+- **Drive anything:** 11 cars (hatchback, SUV, pickup, muscle, supercar…), a **sport motorbike** and a **bicycle**, with drift physics (handbrake), nitro, damage, smoke and wrecks. Carjack traffic or steal a police car.
+- **Manual gearbox (optional):** R · N · 1–6 with a rev counter, shift light, engine braking, a rev limiter and over-rev protection
 - **Living city:** lane-following traffic, pedestrians that walk, cross, dodge and flee, streetlights, a day/night cycle, rain and lightning
 - **Cops:** a 5-star wanted level, pursuit AI that routes through the streets, a helicopter with a spotlight from 3 stars, getting caught, evading
 - **Story:** 4 missions with Vince and Marlo (Fresh Start → Special Delivery → Heat Check → Kingpin Grand Prix)
@@ -39,8 +40,30 @@ Play in the same city with friends and talk to them.
 - **Contact:** cars bump off each other, you can punch other players, and a car can run you over. Everyone sees the same time of day and weather, set by the room host.
 - **Shared vs local:** players, their cars, voice, chat, time and weather are shared. Traffic, pedestrians, cops, gangs and missions are still each player's own.
 - **Play over the internet, with no server:** open the game from its GitHub Pages link. Without `mp_server.py` the game switches to **peer-to-peer**: the first player in a room hosts it in their browser and everyone else connects straight to them over WebRTC. The public PeerJS broker only introduces the browsers to each other. If the host leaves, the next player takes over automatically. The host's browser is the room server, so keep that tab open.
-- Peer-to-peer works on networks that block devices from seeing each other (like university eduroam), because traffic goes out through the internet. It uses public STUN, plus a public TURN relay as a fallback for very strict networks.
-- `python tests/multiplayer_test.py` (with the server running) plays two Chrome players against each other: 23 checks.
+- Peer-to-peer works on networks that block devices from seeing each other (like university eduroam), because traffic goes out through the internet. It uses public STUN. Two players behind the *same* strict network (for example both on eduroam) also need a TURN relay. Add one in `js/p2p.js` or with `?turn=turn:host:port,user,pass`.
+- `python tests/multiplayer_test.py` (with the server running) plays two Chrome players against each other: 27 checks, including riding as a passenger.
+
+## 🗺️ The Bay Region: four cities
+The map grew from one island to a ~14 km region. **Neon Bay** is unchanged (same streets, missions and saves); three
+mainland cities sit on the same road grid and are joined by highways:
+
+| City | Look |
+|---|---|
+| **Neon Bay** | The original island city: downtown, docks, beach, parks |
+| **Highgate** (east, over the Bay Bridge) | Glass skyscrapers up to ~60 storeys with beacon masts, midtown offices, a riverside park |
+| **Port Calder** (south, over the causeway) | Red-brick old town, a container port with cranes and stacked containers, a harbour green |
+| **Sierra Vista** (south-east) | Desert adobe town, a neon casino strip with pools and palms, ranches with cacti |
+
+- **Highways:** Route 1 (Bay Bridge, a suspension bridge with towers and cables), Route 2 (Calder Causeway), Route 9 (Mesa Pass) and Route 5 (Desert Line). They have green overhead signs with distances, highway lamps and two gas stations.
+- **Countryside:** forests and farm fields in Green Valley, and cacti and boulders in the Red Mesa Desert. The sea now shows through the coastline.
+- Traffic, pedestrians, cops, GPS routing and the minimap work everywhere. The city map labels every city.
+- **Performance:** the ground streams in 24×24-tile chunks with detailed textures near the camera, and buildings, trees and lamps beyond the fog are skipped. The four cities run as fast as the old single island.
+
+## 🏍️ Bikes, manual cars and riding together
+- **Sport motorbike (Raptor 600) and bicycle (Urban Pedal):** a rider sits on the bike, leans into corners, pops small wheelies under hard throttle, and the cyclist pedals. A hard crash throws you over the handlebars. There's one of each outside your crib, more in parking bays, and both are sold at Turbo Motors.
+- **Manual gearbox:** turn it on with `L` or Phone → Settings → Gearbox. Shift up with `I` / `.` and down with `U` / `,`. A controller uses LB / RB in a manual car, and touch screens get ▲ / ▼ buttons. Go below 1st for N, then R. Each gear has its own top speed and torque curve. You get engine braking off the throttle, a bouncing limiter at 7,200 rpm, and protection that refuses a downshift that would over-rev.
+- **Two people, one car (online):** walk up to a friend's car or motorbike and press **F** to ride as their passenger. You sit in the passenger seat or on the pillion, the camera follows the car, and voice chat keeps working. Press **F** again to get out.
+- **Realistic cars:** a seated driver behind see-through glass, with seats, a dashboard and a steering wheel. Glasshouses taper inwards towards the roof, and the cars have alloy wheels, door mirrors, grilles and number plates. The SUV has roof rails and the pickup has an open bed.
 
 ## 📸 Realism pass
 - **Reflections:** every 2 seconds the sky, sun and a band of city neon are rendered into an environment map. Car paint (clear-coat), glass, chrome hubs, the sea and wet roads reflect it, so reflections follow the time of day.

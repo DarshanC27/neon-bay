@@ -109,6 +109,7 @@
     if (a.flip) s.fl = r3(a.flip); if (a.swingPitch) s.spp = r3(a.swingPitch);
     if (P.swing) s.sw = [r1(P.swing.x), r1(P.swing.y), r1(P.swing.z)];
     if (c) s.c = { t: c.type, col: c.color, x: r1(c.x), y: r1(c.y), z: r1(c.z), a: r3(c.a), vx: r1(c.vx), vy: r1(c.vy), vz: r1(c.vz), vF: r1(c.vF || 0), st: r3(c.ctrl.s), br: c.braking ? 1 : 0, si: c.siren ? 1 : 0, bo: c.ctrl.boost ? 1 : 0, w: c.wrecked ? 1 : 0 };
+    if (P.ride) { s.rd = P.ride.id; s.m = "sit"; }
     s.mic = V.talking() ? 1 : 0; s.t = Math.round(serverNow());
     send({ type: "state", s });
   }
@@ -207,20 +208,58 @@
       } else p.car = null;
       drawTag(p); drawRope(p); drawRing(p); engineSound(p, dt);
     }
+    rideUpdate();
     V.update(dt);
     // keep the player list fresh (ping, distances, who's talking)
     listT -= dt; if (listT <= 0) { listT = 0.25; updateList(); }
   };
   let listT = 0;
   N.cars = () => { const out = []; for (const p of N.peers.values()) if (p.vis && p.car) out.push(p.car); return out; };
-  N.avatars = () => { const out = []; for (const p of N.peers.values()) if (p.vis && !p.car) out.push(p); return out; };
+  N.avatars = () => { const out = []; for (const p of N.peers.values()) if (p.vis && !p.car && !(p.s && p.s.rd)) out.push(p); return out; };
+
+  // ---------- riding as a passenger in a friend's car / on the back of their bike ----------
+  const seatFree = (p) => { for (const q of N.peers.values()) if (q.s && q.s.rd === p.id) return false; return true; };
+  N.tryRide = function () {
+    if (!N.on || P.car || P.ride || (P.z || 0) > 8) return false;
+    let best = null, bd = 70;
+    for (const p of N.peers.values()) {
+      if (!p.vis || !p.car || p.car.wrecked || p.car.s.pedal) continue;
+      const d = dist(p.car.x, p.car.y, P.x, P.y); if (d < bd && seatFree(p)) { best = p; bd = d; }
+    }
+    if (!best) return false;
+    P.ride = { id: best.id }; P.vx = P.vy = 0; G.audio.sfx("door"); G.heroes.reset && G.heroes.reset();
+    G.ui.toast(`Riding with ${best.name} · F to get out`, best.color); sendState();
+    return true;
+  };
+  N.leaveRide = function (msg) {
+    const p = P.ride && N.peers.get(P.ride.id), c = p && p.car; P.ride = null;
+    if (c) { const lx = -Math.sin(c.a), ly = Math.cos(c.a); let x = c.x + lx * 30, y = c.y + ly * 30; if (G.world.pointBlocked(x, y, 8)) { x = c.x - lx * 30; y = c.y - ly * 30; } P.x = x; P.y = y; }
+    P.z = 0; P.vx = P.vy = 0; G.audio.sfx("door"); if (msg) G.ui.toast(msg, "#8d99ae"); sendState();
+  };
+  N.rideCar = () => { if (!P.ride) return null; const p = N.peers.get(P.ride.id); return p && p.vis && p.car ? p.car : null; };
+  function rideUpdate() {
+    if (!P.ride) return;
+    const p = N.peers.get(P.ride.id);
+    if (!N.on || !p) return N.leaveRide("The driver left");
+    if (!p.car) return N.leaveRide(`${p.name} got out`);
+    const c = p.car; P.x = c.x; P.y = c.y; P.z = c.z; P.a = c.a; P.vx = c.vx; P.vy = c.vy;
+  }
+  // who sits in the passenger seat of this car? (other players, or me when I'm riding along)
+  N.passengersOf = function (car) {
+    const out = [];
+    if (!N.on) return out;
+    const driverId = car === P.car ? N.id : car.remote ? car.remote.id : null; if (!driverId) return out;
+    for (const q of N.peers.values()) if (q.vis && q.s && q.s.rd === driverId) out.push({ key: "p:" + q.id, hero: q.hero });
+    if (P.ride && P.ride.id === driverId) out.push({ key: "me", local: true });
+    return out;
+  };
 
   // ---------- physical contact with other players ----------
   // Each client resolves its own side of a contact: my car bounces off your car on my screen, yours off mine on yours.
   N.collide = function (onCrash) {
     if (!N.on) return;
     for (const p of N.peers.values()) {
-      if (!p.vis) continue;
+      if (!p.vis || P.ride || (p.s && p.s.rd)) continue; // passengers don't collide
       if (p.car && P.car) {
         const rc = p.car, sx = rc.x, sy = rc.y, svx = rc.vx, svy = rc.vy;
         const imp = G.collideCars(P.car, rc);
@@ -242,7 +281,7 @@
   };
   // my punch landed on another player? (called from heroes.meleeHit)
   N.melee = function (reach, dmg, knock) {
-    if (!N.on) return false;
+    if (!N.on || P.ride) return false;
     let any = false;
     for (const p of N.peers.values()) {
       if (!p.vis || p.car) continue;

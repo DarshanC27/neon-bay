@@ -107,6 +107,21 @@ with sync_playwright() as p:
     check("chat reaches B", wait(lambda: "hello bob" in B.inner_text("#mplog"), 4))
     check("typing in chat doesn't steer the car", A.evaluate("!Input.keys.KeyW"))
 
+    # ---- B rides as A's passenger
+    A.evaluate("(() => { const P = G.player; if (P.car) G.exitCar(); const x = 41 * 64, y = 40.5 * 64; G.cars = G.cars.filter(c => Math.hypot(c.x - x, c.y - y) > 300 || c.keep); const c = new G.Car('sedan', x, y, 0, '#e63946'); c.keep = true; G.cars.push(c); P.x = x; P.y = y + 22; P.z = 0; G.enterNearestCar(); })()")
+    time.sleep(1.0)
+    B.evaluate("(() => { const P = G.player; P.x = 41 * 64; P.y = 40.5 * 64 + 26; P.z = 0; })()")
+    time.sleep(0.8); B.keyboard.press("KeyF"); time.sleep(0.8)
+    check("B gets in A's car as a passenger (F)", B.evaluate("!!G.player.ride"))
+    check("A sees B in the passenger seat", wait(lambda: A.evaluate("G.net.passengersOf(G.player.car).length") == 1, 4))
+    hold_s = 2.0; A.keyboard.down("KeyW"); time.sleep(hold_s); A.keyboard.up("KeyW"); time.sleep(0.6)
+    gapr = B.evaluate("(() => { const c = G.net.rideCar(); return c ? Math.hypot(c.x - G.player.x, c.y - G.player.y) : 999; })()")
+    moved = B.evaluate("G.player.x") - 41 * 64
+    check("passenger rides along with the car", gapr < 5 and moved > 150, f"gap {gapr:.1f}, moved {moved:.0f}")
+    B.screenshot(path=str(OUT / "92_mp_passenger.png"))
+    B.keyboard.press("KeyF"); time.sleep(0.8)
+    check("passenger can get out (F)", not B.evaluate("!!G.player.ride") and wait(lambda: A.evaluate("G.net.passengersOf(G.player.car).length") == 0, 4))
+
     # ---- leave
     A.close(); time.sleep(1.5)
     check("B sees A leave", B.evaluate("G.net.peers.size") == 0)

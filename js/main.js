@@ -43,6 +43,8 @@
     const prng = mulberry32(42);
     for (const s of W.parkingSpots) if (prng() < 0.6) { const c = new G.Car(pick(["sedan", "compact", "compact", "muscle", "van", "sedan"]), s.x, s.y, s.a); c.keep = true; c.parked = true; G.cars.push(c); }
     const sh = W.pois.safehouse; const starter = new G.Car("compact", sh.x + 90, sh.y - 60, 0, "#ffb703"); starter.keep = true; starter.starter = true; G.cars.push(starter);
+    for (const [t, dx] of [["sportbike", 30], ["bicycle", 58]]) { const bk = new G.Car(t, sh.x + dx, sh.y - 18, Math.PI / 2); bk.keep = true; bk.parked = true; G.cars.push(bk); } // on the pavement by the door
+    for (const s of W.parkingSpots) if (prng() < 0.12) { const bk = new G.Car(prng() < 0.6 ? "sportbike" : "bicycle", s.x + 28, s.y, s.a); bk.keep = true; bk.parked = true; if (!G.cars.some((c) => dist(c.x, c.y, bk.x, bk.y) < 30)) G.cars.push(bk); }
     G.populateInitial();
     G.state.mode = "play"; G.state.started = true;
     document.getElementById("title").classList.remove("on");
@@ -183,7 +185,7 @@
       }
     }
     // player on foot hit by cars
-    if (!P.car && !attract) for (const c of A) {
+    if (!P.car && !P.ride && !attract) for (const c of A) {
       if (c.speed > 140 && c.z < 10 && (P.z || 0) < 10 && dist(c.x, c.y, P.x, P.y) < c.s.h / 2 + 10 && P.hitCd <= 0) {
         P.hp -= c.speed * 0.07; P.hitCd = 0.8; P.x += c.vx * 0.08; P.y += c.vy * 0.08; G.shake(10); G.audio.sfx("crash", 0.6);
         if (P.hp <= 0) return blackout();
@@ -215,6 +217,10 @@
     const dmg = (imp - 70) * 0.11;
     a.damage(dmg * (b ? b.s.mass : 1.2)); if (b) b.damage(dmg * a.s.mass);
     const involved = a === P.car || b === P.car;
+    if (involved && P.car.s.bike && imp > 150 && !P.car.wrecked) { // thrown over the handlebars
+      const bk = P.car; G.exitCarForce(); P.hp -= Math.min(35, imp * 0.06); P.vx = bk.vx * 0.6; P.vy = bk.vy * 0.6; P.vz = 160; P.z = 4;
+      G.ui.toast("You were thrown off the bike!", "#ff4d6d"); if (P.hp <= 0) return blackout();
+    }
     if (involved) {
       G.shake(Math.min(18, imp / 25)); G.audio.sfx("crash", clamp(imp / 400, 0.3, 1));
       const other = a === P.car ? b : a;
@@ -231,7 +237,7 @@
   function handleKeys() {
     const S = G.state, mode = S.mode;
     if (mode === "play") {
-      if (Input.hit("KeyF")) P.car ? G.exitCar() : G.enterNearestCar();
+      if (Input.hit("KeyF")) { if (P.ride) G.net.leaveRide(); else if (P.car) G.exitCar(); else if (!(G.net && G.net.tryRide()) ) G.enterNearestCar(); }
       if (Input.hit("KeyM")) { G.render.releaseMouse(); G.ui.toggleMap(true); }
       else if (Input.hit("KeyP", "Tab")) { G.render.releaseMouse(); G.ui.togglePhone(true); }
       else if (Input.hit("Escape")) G.ui.togglePause(true);
@@ -244,6 +250,7 @@
       if (Input.hit("A_photo")) { document.body.classList.toggle("photo"); G.ui.toast(document.body.classList.contains("photo") ? "Photo mode: HUD hidden (press again to show)" : "HUD back on", "#c77dff"); }
       if (G.net) G.net.keys();
       if (Input.hit("KeyR") && P.car && P.car.speed < 30) { P.car.a += Math.PI; P.car.vx = P.car.vy = 0; }
+      if (Input.hit("A_trans")) { G.settings.manual = !G.settings.manual; G.ui.toast(G.settings.manual ? `Manual gearbox ON · ${G.controls.label("gearUp")} up · ${G.controls.label("gearDn")} down` : "Automatic gearbox", "#ffd60a"); if (P.car) { P.car.gear = 1; P.car.shiftT = 0; } G.save(); }
     } else if (mode === "map") { if (Input.hit("KeyM", "Escape")) G.ui.toggleMap(false); }
     else if (mode === "phone") { if (Input.hit("KeyP", "Tab")) G.ui.togglePhone(false); else G.ui.updatePhone(); }
     else if (mode === "shop") G.ui.updateMenu();

@@ -25,6 +25,9 @@
     ["car", "KeyF", "Enter / exit / carjack", "World", ["KeyF"]],
     ["horn", "KeyH", "Horn", "World", ["KeyH"]],
     ["flip", "KeyR", "Turn the car around", "World", ["KeyR"]],
+    ["gearUp", "A_gearUp", "Shift up (manual gearbox)", "Driving", ["KeyI", "Period"]],
+    ["gearDn", "A_gearDn", "Shift down (manual gearbox)", "Driving", ["KeyU", "Comma"]],
+    ["trans", "A_trans", "Switch manual / automatic", "Driving", ["KeyL"]],
     ["cancel", "A_cancel", "Cancel current job", "World", ["KeyZ"]],
     ["map", "KeyM", "City map", "Menus", ["KeyM"]],
     ["phone", "KeyP", "Phone", "Menus", ["KeyP", "Tab"]],
@@ -76,7 +79,8 @@
     C.pad = gp;
     if (!gp) { if (padPrev.size) { for (const v of padPrev) Input.keys[v] = false; padPrev = new Set(); } return; }
     const now = new Set(), b = gp.buttons, ax = gp.axes, val = (i) => (b[i] ? (typeof b[i] === "object" ? b[i].value || (b[i].pressed ? 1 : 0) : b[i]) : 0);
-    for (const i in PAD) if (val(+i) > 0.5) now.add(PAD[i]);
+    const manualCar = G.player && G.player.car && G.player.car.manual; // in a manual car LB / RB are the paddle shifters
+    for (const i in PAD) if (val(+i) > 0.5) now.add(manualCar && (i === "4" || i === "5") ? (i === "5" ? "A_gearUp" : "A_gearDn") : PAD[i]);
     if (val(7) > 0.25) now.add("KeyW"); if (val(6) > 0.25) now.add("KeyS");
     if ((ax[0] || 0) < -0.4) now.add("KeyA"); if ((ax[0] || 0) > 0.4) now.add("KeyD");
     if ((ax[1] || 0) < -0.4) now.add("KeyW"); if ((ax[1] || 0) > 0.4) now.add("KeyS");

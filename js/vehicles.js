@@ -9,8 +9,17 @@
     sports: { name: "Vortex GT", w: 45, h: 21, accel: 650, max: 520, grip: 8.6, hp: 100, mass: 0.95, price: 15000, colors: ["#00b4d8", "#f72585", "#06d6a0", "#ffd60a"] },
     super: { name: "Neon X", w: 47, h: 21, accel: 820, max: 640, grip: 9.6, hp: 110, mass: 0.95, price: 35000, colors: ["#c77dff", "#00f5d4", "#fee440"] },
     police: { name: "Interceptor", w: 46, h: 22, accel: 600, max: 500, grip: 8.8, hp: 170, mass: 1.3, colors: ["#0b132b"], police: true },
+    hatch: { name: "Breeze HB", w: 39, h: 20, accel: 410, max: 330, grip: 7.8, hp: 85, mass: 0.85, price: 3500, colors: ["#d62828", "#f1faee", "#3a86ff", "#8ac926", "#ffbe0b", "#6c757d"] },
+    suv: { name: "Terrain XL", w: 48, h: 24, accel: 440, max: 350, grip: 6.8, hp: 145, mass: 1.45, price: 8500, colors: ["#1b263b", "#e9ecef", "#495057", "#7f5539", "#2d6a4f", "#9d0208"] },
+    pickup: { name: "Workhorse", w: 53, h: 24, accel: 410, max: 335, grip: 6.5, hp: 155, mass: 1.55, price: 7000, colors: ["#e63946", "#f8f9fa", "#264653", "#bc6c25", "#343a40"] },
+    sportbike: { name: "Raptor 600", w: 22, h: 8, accel: 720, max: 540, grip: 9.2, hp: 55, mass: 0.35, price: 7500, colors: ["#e63946", "#1d3557", "#ffd60a", "#f8f9fa", "#06d6a0", "#111111"], bike: true },
+    bicycle: { name: "Urban Pedal", w: 18, h: 6, accel: 150, max: 110, grip: 9.5, hp: 30, mass: 0.15, price: 400, colors: ["#3a86ff", "#ff006e", "#8ac926", "#f8f9fa", "#111111"], bike: true, pedal: true },
   });
-  G.TRAFFIC_MIX = ["sedan", "sedan", "sedan", "compact", "compact", "taxi", "van", "muscle", "sports"];
+  G.TRAFFIC_MIX = ["sedan", "sedan", "sedan", "compact", "compact", "taxi", "van", "muscle", "sports", "hatch", "hatch", "suv", "suv", "pickup", "sportbike"];
+  // manual gearbox: each gear tops out (at the 7200 rpm redline) at this fraction of the car's top speed
+  const RAT = (G.GEAR_RATIOS = [0, 0.2, 0.36, 0.52, 0.68, 0.84, 1.02]), REV_TOP = 0.3, IDLE = 900, RED = 7200;
+  // torque curve: soft at idle, peak around 5000 rpm, tailing off towards the limiter
+  const torque = (r) => clamp(0.45 + 1.4 * r - 1.1 * r * r, 0.3, 1);
   let nextId = 1;
 
   class Car {
@@ -22,6 +31,17 @@
       this.ctrl = { t: 0, s: 0, hb: false, boost: false };
       this.speed = 0; this.vF = 0; this.slip = 0; this.air = 0; this.justLanded = 0;
       this.wrecked = false; this.braking = false; this.dents = []; this.wreckT = 0;
+      this.manual = false; this.gear = 1; this.shiftT = 0; this.rpm = IDLE; this.limiter = 0;
+    }
+    // ---- manual gearbox (the clutch is automatic: a shift just cuts drive for a moment) ----
+    gearTop(g = this.gear) { return this.s.max * (g > 0 ? RAT[g] : g < 0 ? REV_TOP : 1); }
+    shift(dir) {
+      if (!this.manual || this.s.pedal) return false;
+      const g = clamp(this.gear + dir, -1, 6); if (g === this.gear) return false;
+      const fwd = this.vF || 0;
+      if (g === -1 && fwd > 25) return "moving"; // can't drop into reverse while rolling forward
+      if (dir < 0 && g > 0 && fwd > this.gearTop(g) * 1.08) return "overrev"; // would blow the engine past the redline
+      this.gear = g; this.shiftT = g === 0 ? 0 : 0.17; return true;
     }
     update(dt, env) {
       const c = this.ctrl, s = this.s;
@@ -34,7 +54,7 @@
         let fx = Math.cos(this.a), fy = Math.sin(this.a);
         let vF = this.vx * fx + this.vy * fy;
         const spd = Math.min(1, Math.abs(vF) / 140);
-        const steerRate = (c.hb ? 3.4 : 2.5) * spd * (1 - Math.min(0.4, Math.abs(vF) / 1700));
+        const steerRate = (c.hb ? 3.4 : 2.5) * (s.bike ? 1.25 : 1) * (s.bike ? Math.min(1, Math.abs(vF) / 60) : spd) * (1 - Math.min(0.4, Math.abs(vF) / 1700));
         this.a += c.s * steerRate * dt * (vF >= -5 ? 1 : -1);
         fx = Math.cos(this.a); fy = Math.sin(this.a);
         const rx = -fy, ry = fx;
@@ -43,11 +63,15 @@
         const dmg = this.hp < s.hp * 0.25 ? 0.7 : 1;
         const max = s.max * (c.boost ? 1.32 : 1) * dmg, acc = s.accel * (c.boost ? 1.7 : 1) * dmg;
         this.braking = false;
-        if (c.t > 0) { if (vF < -10) vF += 900 * dt * c.t; else if (vF < max) vF += acc * c.t * dt * (1 - Math.max(0, vF) / max * 0.55); }
+        if (this.manual && !s.pedal) vF = this.manualDrive(vF, c, max, acc, dt);
+        else if (c.t > 0) { if (vF < -10) vF += 900 * dt * c.t; else if (vF < max) vF += acc * c.t * dt * (1 - Math.max(0, vF) / max * 0.55); }
         else if (c.t < 0) { if (vF > 10) { vF -= 950 * dt * -c.t; this.braking = true; } else if (vF > -max * 0.35) vF += acc * 0.6 * c.t * dt; }
         else vF -= Math.sign(vF) * Math.min(Math.abs(vF), 130 * dt);
         if (c.hb) vF -= Math.sign(vF) * Math.min(Math.abs(vF), 240 * dt);
         if (vF > max * 1.02) vF -= (vF - max) * 2 * dt;
+        if (s.bike && this.z === 0) { // two wheels: brakes and grip are weaker, the rear steps out under the handbrake
+          if (c.hb && Math.abs(vF) > 80) vR += c.s * Math.abs(vF) * 0.9 * dt;
+        }
         vF *= 1 - 0.22 * dt;
         const grip = s.grip * (c.hb ? 0.16 : 1) * env.grip;
         this.slip = Math.abs(vR);
@@ -56,8 +80,32 @@
       }
       this.speed = Math.hypot(this.vx, this.vy);
       this.x += this.vx * dt; this.y += this.vy * dt;
+      if (!this.manual) this.rpm = 0;
+    }
+    manualDrive(vF, c, max, acc, dt) {
+      const g = this.gear, v = Math.abs(vF);
+      this.shiftT = Math.max(0, this.shiftT - dt);
+      const engaged = g !== 0 && this.shiftT <= 0, top = this.gearTop(g) * (max / this.s.max);
+      // engine speed follows the wheels while in gear, free-revs in neutral or mid-shift
+      let target = engaged ? IDLE + (v / top) * (RED - IDLE) : IDLE + Math.max(0, c.t) * (RED - 700 - IDLE);
+      if (engaged && target < IDLE + 400 && c.t > 0) target = IDLE + 1300; // clutch slips to pull away
+      target = Math.min(target, RED + 150);
+      this.rpm += (Math.max(IDLE, target) - this.rpm) * Math.min(1, dt * (engaged ? 30 : 8));
+      const r = clamp((this.rpm - IDLE) / (RED - IDLE), 0, 1.2);
+      this.limiter = engaged && this.rpm >= RED - 40 && c.t > 0 ? this.limiter + dt : 0;
+      if (c.t < 0 && v > 5) { vF -= Math.sign(vF) * Math.min(v, 950 * dt * -c.t); this.braking = true; return vF; }
+      if (!engaged) return vF - Math.sign(vF) * Math.min(v, 55 * dt); // coasting in neutral / clutch in
+      const dir = g < 0 ? -1 : 1, mult = g < 0 ? 1.3 : Math.min(1.5, 0.45 / RAT[g]);
+      if (c.t > 0) {
+        if (vF * dir < -10) vF += dir * 900 * dt; // rolling the wrong way: the drivetrain fights it
+        else if (this.rpm < RED - 40) vF += dir * acc * c.t * mult * torque(r) * dt;
+        else vF -= dir * 30 * dt; // fuel cut on the limiter
+      } else if (c.t === 0) vF -= Math.sign(vF) * Math.min(v, (40 + 160 * r) * dt * (g < 0 ? 1 : Math.min(1.6, 0.5 / RAT[g]))); // engine braking
+      if (v > top * 1.04 && vF * dir > 0) vF -= dir * (v - top) * 3 * dt; // can't go faster than the gear allows
+      return vF;
     }
     circles() {
+      if (this.s.bike) { const off = this.s.w / 2 - 4, fx = Math.cos(this.a), fy = Math.sin(this.a); return [[fx * off, fy * off, 4.5], [-fx * off, -fy * off, 4.5]]; }
       const off = this.s.w / 2 - this.s.h / 2, fx = Math.cos(this.a), fy = Math.sin(this.a), r = this.s.h / 2 + 1;
       return [[fx * off, fy * off, r], [-fx * off, -fy * off, r]];
     }

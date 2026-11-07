@@ -10,7 +10,7 @@
     // pre-render the city map
     mapImg = document.createElement("canvas"); mapImg.width = mapImg.height = W.SIZE * MS;
     const g = mapImg.getContext("2d");
-    const COL = { [TT.WATER]: "#0b3d5c", [TT.SAND]: "#d9c48f", [TT.GRASS]: "#3b6e37", [TT.ROAD]: "#d8dde6", [TT.WALK]: "#6f7480", [TT.LOT]: "#4a4d54", [TT.PARK]: "#2f8f46", [TT.PLAZA]: "#8f8a83", [TT.PARKING]: "#3a3d44" };
+    const COL = { [TT.WATER]: "#0b3d5c", [TT.SAND]: "#d9c48f", [TT.GRASS]: "#3b6e37", [TT.ROAD]: "#d8dde6", [TT.WALK]: "#6f7480", [TT.LOT]: "#4a4d54", [TT.PARK]: "#2f8f46", [TT.PLAZA]: "#8f8a83", [TT.PARKING]: "#3a3d44", [TT.DIRT]: "#b08a5c" };
     for (let ty = 0; ty < W.N; ty++) for (let tx = 0; tx < W.N; tx++) { g.fillStyle = COL[W.tiles[ty * W.N + tx]]; g.fillRect(tx * T * MS, ty * T * MS, T * MS + 0.5, T * MS + 0.5); }
     for (const b of W.buildings) { g.fillStyle = b.poi ? b.neon : "#2a2f3d"; g.globalAlpha = b.poi ? 0.9 : 0.85; g.fillRect(b.x * MS, b.y * MS, b.w * MS, b.h * MS); }
     g.globalAlpha = 1;
@@ -154,8 +154,17 @@
     for (let v = 0; v <= max; v += 80) { const a = a0 + (a1 - a0) * (v / max); spc.fillText(v, R + Math.cos(a) * (R - 36), R + Math.sin(a) * (R - 36)); }
     spc.fillStyle = "#fff"; spc.font = "bold 44px Bahnschrift"; spc.fillText(kmh, R, R - 4);
     spc.font = "12px Bahnschrift"; spc.fillStyle = "#aab"; spc.fillText("KM/H", R, R + 24);
-    const gear = c.vF < -5 ? "R" : Math.max(1, Math.min(6, 1 + Math.floor(Math.abs(c.vF) / 110)));
-    spc.font = "bold 16px Bahnschrift"; spc.fillStyle = "#ffd60a"; spc.fillText(gear, R, R + 46);
+    if (c.manual) { // rev counter ring + shift light + big gear letter
+      const r01 = clamp((c.rpm - 900) / 6300, 0, 1), b0 = Math.PI * 0.8, b1 = Math.PI * 2.2;
+      spc.lineWidth = 5; spc.strokeStyle = "rgba(255,255,255,0.1)"; spc.beginPath(); spc.arc(R, R, R - 30, b0, b1); spc.stroke();
+      spc.strokeStyle = r01 > 0.86 ? "#ff3048" : r01 > 0.7 ? "#ffd60a" : "#19f5a0"; spc.beginPath(); spc.arc(R, R, R - 30, b0, b0 + (b1 - b0) * r01); spc.stroke();
+      const g = c.gear < 0 ? "R" : c.gear === 0 ? "N" : String(c.gear), flash = r01 > 0.9 && Math.floor(G.time * 14) % 2;
+      spc.font = "bold 26px Bahnschrift"; spc.fillStyle = flash ? "#ff3048" : "#ffd60a"; spc.fillText(g, R, R + 50);
+      spc.font = "10px Bahnschrift"; spc.fillStyle = "#aab"; spc.fillText(`${(c.rpm / 1000).toFixed(1)}k RPM · M`, R, R + 70);
+    } else {
+      const gear = c.vF < -5 ? "R" : Math.max(1, Math.min(6, 1 + Math.floor(Math.abs(c.vF) / 110)));
+      spc.font = "bold 16px Bahnschrift"; spc.fillStyle = "#ffd60a"; spc.fillText(gear, R, R + 46);
+    }
     $("carname").textContent = c.s.name;
   }
 
@@ -188,7 +197,9 @@
     const got = W.tokens.filter((t) => t.got).length;
     const [px, py] = toS(P.x, P.y);
     g.save(); g.translate(px, py); g.rotate(P.a); g.fillStyle = "#fff"; g.shadowColor = "#fff"; g.shadowBlur = 10; g.beginPath(); g.moveTo(12, 0); g.lineTo(-8, 8); g.lineTo(-4, 0); g.lineTo(-8, -8); g.fill(); g.restore();
-    g.font = "bold 30px Bahnschrift"; g.fillStyle = "#fff"; g.textAlign = "left"; g.fillText("NEON BAY", ox, oy - 26);
+    g.textAlign = "center";
+    for (const c of W.CITIES) { const [x, y] = toS(c.cx, c.y0 - 120); g.font = "bold 18px Bahnschrift"; g.lineWidth = 4; g.strokeStyle = "rgba(0,0,0,0.85)"; g.strokeText(c.name.toUpperCase(), x, y); g.fillStyle = c.color; g.fillText(c.name.toUpperCase(), x, y); }
+    g.font = "bold 30px Bahnschrift"; g.fillStyle = "#fff"; g.textAlign = "left"; g.fillText("THE BAY REGION", ox, oy - 26);
     g.font = "14px Bahnschrift"; g.fillStyle = "#9aa3c7"; g.textAlign = "right";
     g.fillText(`Left-click: set waypoint · Right-click: clear · M / Esc: close · Neon tokens: ${got}/25`, ox + size, oy - 26);
   }
@@ -299,6 +310,7 @@
       { label: "Traffic density", right: S.traffic, act: () => { S.traffic = S.traffic >= 45 ? 10 : S.traffic + 10; refresh(); } },
       { label: "Pedestrians", right: S.peds, act: () => { S.peds = S.peds >= 70 ? 10 : S.peds + 15; refresh(); } },
       { label: "Character voices (TTS)", right: S.voices ? "ON" : "OFF", act: () => { S.voices = !S.voices; refresh(); } },
+      { label: "Gearbox", right: S.manual ? "MANUAL" : "AUTOMATIC", act: () => { S.manual = !S.manual; if (P.car) { P.car.gear = 1; P.car.shiftT = 0; } refresh(); } },
     ];
     const refresh = () => { const sel = menu ? menu.sel : 0; phoneMenu("Settings", items()); menu.sel = sel; renderMenu(); };
     phoneMenu("Settings", items());
@@ -332,7 +344,7 @@
       }
     } else if (id === "dealer") {
       title = "🚗 TURBO MOTORS";
-      items = ["compact", "sedan", "van", "muscle", "sports", "super"].map((t) => {
+      items = ["bicycle", "compact", "hatch", "sedan", "sportbike", "van", "pickup", "suv", "muscle", "sports", "super"].map((t) => {
         const c = G.CAR_TYPES[t], own = S.owned[t];
         return { label: `${c.name}  <small>${Math.round(c.max * 0.6)} km/h · grip ${c.grip}</small>`, right: own ? "OWNED" : fmtMoney(c.price), disabled: own, act: buy(c.price, () => {
           S.owned[t] = true; const lp = W.randomLanePoint(P.x, P.y, 80, 380); const car = new G.Car(t, lp.x, lp.y, lp.a); car.keep = true; G.cars.push(car);
