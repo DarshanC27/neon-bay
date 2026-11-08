@@ -18,6 +18,31 @@
     if (parent) parent.add(m); return m;
   }
   const grp = (parent, x = 0, y = 0, z = 0) => { const g = new THREE.Group(); g.position.set(x, y, z); if (parent) parent.add(g); return g; };
+  const hashStr = (str) => { let h = 7; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0; return Math.abs(h); };
+  // painted face (eyes, brows, lips) on the head sphere: tinted by the skin colour, costs no extra meshes.
+  // SphereGeometry puts +X (the way the body faces) at u = 0.5.
+  const faceTex = {};
+  function faceMap(kind) {
+    if (faceTex[kind]) return faceTex[kind];
+    const c = document.createElement("canvas"); c.width = 256; c.height = 128; const g = c.getContext("2d");
+    g.fillStyle = "#ffffff"; g.fillRect(0, 0, 256, 128);
+    const cx = 128, ey = 56;
+    for (const sx of [-1, 1]) {
+      const x = cx + sx * 11;
+      g.fillStyle = "#f7f4ee"; g.beginPath(); g.ellipse(x, ey, 5.2, 3.4, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = kind % 3 === 0 ? "#3b2a1c" : kind % 3 === 1 ? "#2d4a63" : "#3d5a2a"; g.beginPath(); g.arc(x + sx * 0.4, ey + 0.3, 2.6, 0, Math.PI * 2); g.fill();
+      g.fillStyle = "#0c0c0c"; g.beginPath(); g.arc(x + sx * 0.4, ey + 0.3, 1.2, 0, Math.PI * 2); g.fill();
+      g.fillStyle = "rgba(255,255,255,0.9)"; g.fillRect(x - 1.4, ey - 1.6, 1.1, 1.1);
+      g.strokeStyle = "rgba(60,35,25,0.55)"; g.lineWidth = 1; g.beginPath(); g.ellipse(x, ey, 5.4, 3.6, 0, Math.PI * 1.05, Math.PI * 1.95); g.stroke(); // upper lid
+      g.fillStyle = "rgba(45,28,18,0.85)"; g.beginPath(); g.ellipse(x, ey - 7.5, 6.5, 1.4, sx * -0.12, 0, Math.PI * 2); g.fill(); // brow
+    }
+    g.fillStyle = "rgba(140,70,60,0.55)"; g.beginPath(); g.ellipse(cx, ey + 20, 6.5, 2.1, 0, 0, Math.PI * 2); g.fill(); // lips
+    g.strokeStyle = "rgba(90,40,35,0.6)"; g.lineWidth = 1; g.beginPath(); g.moveTo(cx - 6.5, ey + 20); g.quadraticCurveTo(cx, ey + 21.5, cx + 6.5, ey + 20); g.stroke();
+    g.fillStyle = "rgba(150,80,70,0.12)"; for (const sx of [-1, 1]) { g.beginPath(); g.arc(cx + sx * 15, ey + 12, 5, 0, Math.PI * 2); g.fill(); } // cheeks
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+    return (faceTex[kind] = t);
+  }
+  const capGeo = (r, cover) => geoCache[`hc${r},${cover}`] || (geoCache[`hc${r},${cover}`] = new THREE.SphereGeometry(r, 16, 10, 0, Math.PI * 2, 0, Math.PI * cover));
 
   // outfit: { style, skin, shirt, pants, hair, shoes, accent }
   H.build = function (o) {
@@ -30,8 +55,8 @@
     const torso = grp(hips);
     const R = { root, pose, hips, torso, style: st };
     const sleeve = st === "civ" || st === "gang" || st === "kai" ? skin : shirt;
-    // torso + pelvis
-    mesh(box(3.6, 2.6, 5.4), pants, 0, -0.6, 0, hips);
+    // torso + pelvis (rounded, not a box)
+    const pel = mesh(cap(1.45, 2.6), pants, 0, -0.5, 0, hips); pel.rotation.x = Math.PI / 2; pel.scale.set(1.22, 1, 1);
     R.chest = mesh(torsoGeo(), shirt, 0, 3.6, 0, torso);
     // head
     const head = (R.head = grp(torso, 0, 8.3, 0));
@@ -43,6 +68,8 @@
       const armMat = sleeve === skin && st === "gang" ? skin : sleeve;
       const sh = grp(torso, 0, 6.4, z);
       const up = mesh(cap(0.9, 2.9), armMat, 0, -1.75, 0, sh);                                      // upper arm
+      mesh(sph(1.12), st === "civ" || st === "kai" || st === "gang" ? shirt : armMat, 0, -0.35, 0, sh).scale.set(1, 0.95, 1); // shoulder
+      if ((st === "civ" || st === "kai") && hashStr(o.shirt + o.skin) % 3) mesh(cap(1.0, 1.2), shirt, 0, -1.25, 0, sh);   // t-shirt sleeve
       const el = grp(sh, 0, -4.1, 0);
       mesh(cap(0.74, 2.4), st === "civ" || st === "kai" || st === "gang" ? skin : shirt, 0, -1.8, 0, el); // forearm
       const hand = mesh(sph(0.82), st === "spindle" || st === "nova" || st === "crimson" ? M(o.accent || "#222") : st === "agent" ? M(o.gloves || "#1b1b22") : skin, 0, -4.1, 0, el);
@@ -60,9 +87,19 @@
 
     // ----- style extras -----
     if (st === "civ" || st === "kai" || st === "gang") {
-      mesh(box(3.6, 1.6, 4.4), hair, -0.4, 3.0, 0, head); // hair cap
-      mesh(box(1.2, 2.2, 4.4), hair, -1.8, 1.8, 0, head);
-      mesh(box(0.4, 0.5, 0.5), M("#111"), 2.25, 1.6, -0.8, head); mesh(box(0.4, 0.5, 0.5), M("#111"), 2.25, 1.6, 0.8, head);
+      const v = o.look !== undefined ? o.look : hashStr((o.skin || "") + (o.shirt || "") + (o.hair || "") + (o.pants || ""));
+      // face painted on a slightly egg-shaped head, plus a nose
+      R.skull.material = matCache["face" + (o.skin || "") + (v % 3)] || (matCache["face" + (o.skin || "") + (v % 3)] = new THREE.MeshStandardMaterial({ color: o.skin || "#c68642", map: faceMap(v % 3), roughness: 0.7 }));
+      R.skull.scale.set(0.97, 1.08, 0.92);
+      const nose = mesh(cap(0.38, 0.6), skin, 2.25, 1.15, 0, head); nose.scale.set(1.1, 1, 0.9); nose.castShadow = false;
+      // hair: six styles chosen from the outfit, all rounded
+      const hs = st === "gang" ? 1 : v % 6, hc = (r, cover, tilt, y = 1.42) => { const m = mesh(capGeo(r, cover), hair, 0.08, y, 0, head); m.rotation.z = tilt; m.scale.set(1, 1.02, 0.95); m.castShadow = false; return m; };
+      if (hs === 0) hc(2.42, 0.52, 0.6);                                                 // short
+      else if (hs === 1) hc(2.34, 0.5, 0.7);                                             // buzz cut
+      else if (hs === 2) { hc(2.45, 0.55, 0.55); const back = mesh(cap(2.0, 3.0), hair, -1.15, -0.1, 0, head); back.scale.set(0.55, 1, 1.05); } // long
+      else if (hs === 3) { hc(2.42, 0.52, 0.6); mesh(sph(1.15), hair, -1.6, 3.2, 0, head); } // bun
+      else if (hs === 4) { const af = hc(2.85, 0.5, 0.3, 1.6); af.scale.set(1, 1.08, 1); } // curly / afro
+      else if (hs === 5) { hc(2.44, 0.52, 0.6); const fr = mesh(cap(0.7, 3.4), hair, 1.55, 3.1, 0, head); fr.rotation.x = Math.PI / 2; fr.rotation.y = 0.0; fr.scale.set(1, 1, 1); } // quiff
     }
     if (st === "gang") { // bandana + tank-top straps
       mesh(box(4.7, 1.1, 4.7), M(o.accent || "#1d7fbf"), 0.1, 2.0, 0, head);

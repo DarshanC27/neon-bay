@@ -216,14 +216,14 @@
   function crash(a, b, imp) {
     const dmg = (imp - 70) * 0.11;
     a.damage(dmg * (b ? b.s.mass : 1.2)); if (b) b.damage(dmg * a.s.mass);
-    const involved = a === P.car || b === P.car;
+    const mine = P.car, involved = !!mine && (a === mine || b === mine); // remember: a bike crash below can throw us off (P.car -> null)
     if (involved && P.car.s.bike && imp > 150 && !P.car.wrecked) { // thrown over the handlebars
       const bk = P.car; G.exitCarForce(); P.hp -= Math.min(35, imp * 0.06); P.vx = bk.vx * 0.6; P.vy = bk.vy * 0.6; P.vz = 160; P.z = 4;
       G.ui.toast("You were thrown off the bike!", "#ff4d6d"); if (P.hp <= 0) return blackout();
     }
     if (involved) {
       G.shake(Math.min(18, imp / 25)); G.audio.sfx("crash", clamp(imp / 400, 0.3, 1));
-      const other = a === P.car ? b : a;
+      const other = a === mine ? b : a;
       if (other && other.driver === "police" && imp > 140) G.crime(1, "Rammed a police car");
     }
     if (Math.abs(a.x - P.x) < 1000 && Math.abs(a.y - P.y) < 1000) for (let k = 0; k < Math.min(14, imp / 25); k++) G.spawnFx("spark", a.x + (b ? (b.x - a.x) / 2 : 0), a.y + (b ? (b.y - a.y) / 2 : 0), { vx: rand(-220, 220), vy: rand(-220, 220), size: 2.5, life: 0.4, max: 0.4, color: pick(["#ffd60a", "#ff9f1c", "#fff"]) });

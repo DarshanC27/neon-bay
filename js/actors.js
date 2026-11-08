@@ -129,6 +129,12 @@
     const turning = !(Math.sign(nx.x - to.x) === dx && Math.sign(nx.y - to.y) === dy);
     let want = ai.cruise;
     if (turning && remaining < 190) want = 105;
+    // traffic lights: brake smoothly to the stop line on red (or on amber when there's room to stop); never stop inside the junction
+    if (to.sig && remaining < 260 && remaining > T + 30) { // only before the stop line: once past it, clear the junction
+      const st = W.signalState(to, dx !== 0, G.time), stopAt = remaining - (T + 34);
+      if (st === "r" || (st === "y" && stopAt > 45)) want = Math.min(want, Math.max(0, stopAt * 1.7));
+      ai.atLight = want === 0;
+    } else ai.atLight = false;
     const ob = obstacleAhead(car, 46 + car.speed * 0.5);
     if (ob) { want = 0; if (ob === P || ob === P.car) ai.honk += dt; }
     else ai.honk = 0;
@@ -137,7 +143,7 @@
     c.t = v < want - 12 ? 1 : v > want + 20 ? -0.7 : 0.12;
     if (want === 0) c.t = v > 8 ? -1 : 0;
     c.hb = false;
-    if (want > 40 && car.speed < 6) { ai.stuck += dt; if (ai.stuck > 2.4) { ai.stuck = 0; ai.rev = 1.1; ai.revSteer = -c.s || 1; } } else ai.stuck = 0;
+    if (want > 40 && car.speed < 6 && !ai.atLight) { ai.stuck += dt; if (ai.stuck > 2.4) { ai.stuck = 0; ai.rev = 1.1; ai.revSteer = -c.s || 1; } } else ai.stuck = 0;
   };
 
   // ---------------- police AI ----------------

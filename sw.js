@@ -1,6 +1,6 @@
 // Offline support for the installed (Home Screen) app.
 // Network-first so updates always show up when online; falls back to the cache when offline.
-const CACHE = "neonbay-v5";
+const CACHE = "neonbay-v6";
 const FILES = [
   "./", "./index.html", "./manifest.webmanifest", "./lib/three.min.js",
   "./js/util.js", "./js/controls.js", "./js/touch.js", "./js/world.js", "./js/vehicles.js", "./js/actors.js",

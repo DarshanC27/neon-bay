@@ -54,6 +54,7 @@
     R.project = (x, y, z = 0) => { const v = new THREE.Vector3(x, z, y).project(camera); return { sx: ((v.x + 1) / 2) * Wd, sy: ((1 - v.y) / 2) * Hd, behind: v.z > 1 }; };
     buildGround(); buildSky(); buildCity(); buildTrees(); buildStreetlights(); buildProps(); buildFx(); buildRain(); buildDynamic(); buildEnv(); buildClouds(); carShared();
     camera.position.set(40 * T, 400, 40 * T); updateGround(true);
+    buildPost();
     R.resize(); addEventListener("resize", R.resize);
     // mouse look (pointer lock while playing)
     canvas.addEventListener("mousedown", () => { if (G.state.mode === "play" && document.pointerLockElement !== canvas && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* not allowed */ } } });
@@ -71,7 +72,84 @@
   R.releaseMouse = () => { if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock(); };
   R.resize = function () {
     Wd = innerWidth; Hd = innerHeight; renderer.setSize(Wd, Hd); camera.aspect = Wd / Hd; camera.updateProjectionMatrix();
+    if (post) post.resize();
   };
+
+  // ---------- post-processing: HDR scene -> bloom -> filmic tone map -> colour grade -> vignette / grain ----------
+  // The scene renders into a half-float target (4x MSAA), so neon, headlights, the sun and wet reflections keep values
+  // above 1. Those bleed into a soft multi-scale bloom; ACES filmic tone mapping and a light grade finish the frame.
+  let post = null;
+  const FS_VERT = "varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }";
+  function buildPost() {
+    if (G.settings && (G.settings.mobile || G.settings.post === false)) return;
+    if (!renderer.capabilities.isWebGL2) return;
+    const HF = { type: THREE.HalfFloatType, depthBuffer: false };
+    const sceneRT = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: 4 });
+    const blur = [0, 1, 2].map(() => [new THREE.WebGLRenderTarget(4, 4, HF), new THREE.WebGLRenderTarget(4, 4, HF)]); // 1/2, 1/4, 1/8 res
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2)), qScene = new THREE.Scene(), qCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    quad.frustumCulled = false; qScene.add(quad);
+    const mat = (frag, uniforms) => new THREE.ShaderMaterial({ vertexShader: FS_VERT, fragmentShader: frag, uniforms, depthTest: false, depthWrite: false, toneMapped: false });
+    const bright = mat(`uniform sampler2D src; uniform float thr; varying vec2 vUv;
+      void main(){ vec4 t = texture2D(src, vUv); vec3 c = t.rgb * step(0.5, t.a); float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); float k = clamp((l - thr) / max(l, 1e-4), 0.0, 1.0);
+        gl_FragColor = vec4(min(c * k, vec3(24.0)), 1.0); }`, { src: { value: null }, thr: { value: 1 } });
+    const blurM = mat(`uniform sampler2D src; uniform vec2 dir; varying vec2 vUv;
+      void main(){ vec3 s = texture2D(src, vUv).rgb * 0.2270270270;
+        s += texture2D(src, vUv + dir * 1.3846153846).rgb * 0.3162162162; s += texture2D(src, vUv - dir * 1.3846153846).rgb * 0.3162162162;
+        s += texture2D(src, vUv + dir * 3.2307692308).rgb * 0.0702702703; s += texture2D(src, vUv - dir * 3.2307692308).rgb * 0.0702702703;
+        gl_FragColor = vec4(s, 1.0); }`, { src: { value: null }, dir: { value: new THREE.Vector2() } });
+    const comp = mat(`uniform sampler2D src; uniform sampler2D b0; uniform sampler2D b1; uniform sampler2D b2;
+      uniform float bloom, exposure, sat, contrast, vig, grain, time, ca; uniform vec3 lift, gain; varying vec2 vUv;
+      vec3 RRTAndODTFit(vec3 v){ vec3 a = v * (v + 0.0245786) - 0.000090537; vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081; return a / b; }
+      vec3 aces(vec3 c){ const mat3 I = mat3(vec3(0.59719,0.07600,0.02840), vec3(0.35458,0.90834,0.13383), vec3(0.04823,0.01566,0.83777));
+        const mat3 O = mat3(vec3(1.60475,-0.10208,-0.00327), vec3(-0.53108,1.10813,-0.07276), vec3(-0.07367,-0.00605,1.07602));
+        c = I * (c * exposure / 0.6); c = RRTAndODTFit(c); return clamp(O * c, 0.0, 1.0); }
+      vec3 toSRGB(vec3 c){ return mix(pow(c, vec3(1.0 / 2.4)) * 1.055 - 0.055, c * 12.92, vec3(lessThanEqual(c, vec3(0.0031308)))); }
+      float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233)) + time) * 43758.5453); }
+      void main(){
+        vec2 d = vUv - 0.5; float r2 = dot(d, d);
+        vec4 s0 = texture2D(src, vUv);
+        vec3 c = ca > 0.0 ? vec3(texture2D(src, vUv - d * ca).r, s0.g, texture2D(src, vUv + d * ca).b) : s0.rgb;
+        vec3 bl = (texture2D(b0, vUv).rgb * 0.5 + texture2D(b1, vUv).rgb * 0.8 + texture2D(b2, vUv).rgb * 1.1) * bloom;
+        float a = clamp(s0.a, 0.0, 1.0);                            // 0 = sky (already display colours)
+        c = mix(c + toSRGB(aces(bl)) * 0.8, toSRGB(aces(c + bl)), a);
+        float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        c = mix(vec3(l), c, sat);                                  // saturation
+        c = (c - 0.5) * contrast + 0.5;                            // contrast
+        c = c * gain + lift * (1.0 - c);                           // split-tone: tinted shadows, warm highlights
+        c *= 1.0 - vig * smoothstep(0.12, 0.62, r2 * 1.6);        // vignette
+        c += (hash(vUv * 1000.0) - 0.5) * grain;                   // film grain (hides banding)
+        gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0); }`,
+      { src: { value: null }, b0: { value: null }, b1: { value: null }, b2: { value: null }, bloom: { value: 0.5 }, exposure: { value: 1 }, sat: { value: 1.08 }, contrast: { value: 1.05 },
+        vig: { value: 0.35 }, grain: { value: 0.018 }, time: { value: 0 }, ca: { value: 0 }, lift: { value: new THREE.Color(0.02, 0.025, 0.04) }, gain: { value: new THREE.Color(1.02, 1.0, 0.97) } });
+    const pass = (m, target) => { quad.material = m; renderer.setRenderTarget(target); renderer.render(qScene, qCam); };
+    post = {
+      comp, sceneRT,
+      resize() {
+        const pr = renderer.getPixelRatio(), w = Math.max(4, Math.floor(Wd * pr)), h = Math.max(4, Math.floor(Hd * pr));
+        sceneRT.setSize(w, h); blur.forEach((pair, i) => pair.forEach((rt) => rt.setSize(Math.max(2, w >> (i + 1)), Math.max(2, h >> (i + 1)))));
+      },
+      render(n01) {
+        const tm = renderer.toneMapping; renderer.toneMapping = THREE.NoToneMapping; // tone mapping happens in the composite
+        skyMat.uniforms.inv.value = 1; skyMat.uniforms.expo.value = renderer.toneMappingExposure;
+        renderer.setRenderTarget(sceneRT); renderer.render(scene, camera);
+        bright.uniforms.src.value = sceneRT.texture; bright.uniforms.thr.value = lerp(1.5, 1.05, n01); pass(bright, blur[0][0]);
+        let src = blur[0][0].texture;
+        blur.forEach((pair, i) => {
+          if (i > 0) { blurM.uniforms.src.value = src; blurM.uniforms.dir.value.set(0, 0); pass(blurM, pair[0]); src = pair[0].texture; }
+          const w = pair[0].width, h = pair[0].height;
+          blurM.uniforms.src.value = src; blurM.uniforms.dir.value.set(1 / w, 0); pass(blurM, pair[1]);
+          blurM.uniforms.src.value = pair[1].texture; blurM.uniforms.dir.value.set(0, 1 / h); pass(blurM, pair[0]); src = pair[0].texture;
+        });
+        const u = comp.uniforms; u.src.value = sceneRT.texture; u.b0.value = blur[0][0].texture; u.b1.value = blur[1][0].texture; u.b2.value = blur[2][0].texture;
+        u.exposure.value = renderer.toneMappingExposure; u.time.value = (G.time || 0) % 100; u.bloom.value = lerp(0.18, 0.6, n01) + G.weather.rain * 0.12;
+        const sp = P.car ? P.car.speed : 0; u.ca.value = P.car && P.car.ctrl.boost ? 0.006 : clamp((sp - 380) / 30000, 0, 0.004);
+        u.sat.value = lerp(1.1, 1.0, G.weather.rain) * (1 - n01 * 0.04); u.lift.value.setRGB(0.012 + n01 * 0.01, 0.018 + n01 * 0.012, 0.03 + n01 * 0.035);
+        pass(comp, null); renderer.setRenderTarget(null); renderer.toneMapping = tm; skyMat.uniforms.inv.value = 0;
+      },
+    };
+    post.resize();
+  }
+  R.setPost = (on) => { G.settings.post = on; if (on && !post) buildPost(); else if (!on && post) { post.sceneRT.dispose(); post = null; } };
   R.size = () => [Wd, Hd];
   R.screenToWorld = (sx, sy) => [cam.x, cam.y];
 
@@ -150,6 +228,9 @@
       const line = (o, a0, a1) => { if (e.h) { g.moveTo(a0, c + o); g.lineTo(a1, c + o); } else { g.moveTo(c + o, a0); g.lineTo(c + o, a1); } };
       g.lineWidth = 3; g.strokeStyle = "#f2c94c"; g.setLineDash([26, 18]); g.beginPath(); line(-3, s0 + 30, s1 - 30); line(3, s0 + 30, s1 - 30); g.stroke(); g.setLineDash([]);
       g.strokeStyle = "rgba(255,255,255,0.55)"; g.beginPath(); line(-T + 6, s0, s1); line(T - 6, s0, s1); g.stroke();
+      g.fillStyle = "rgba(255,255,255,0.8)"; // stop lines where traffic waits for a light (right-hand lane of each approach)
+      if (lo.sig) { if (e.h) g.fillRect(s0 + 30, c - T + 6, 5, T - 8); else g.fillRect(c + 2, s0 + 30, T - 8, 5); }
+      if (hi.sig) { if (e.h) g.fillRect(s1 - 35, c + 2, 5, T - 8); else g.fillRect(c - T + 6, s1 - 35, T - 8, 5); }
       if (!hw || !lo.hwy) { if (e.h) zebra(s0 + 4, c - T + 8, 22, 2 * T - 16, true); else zebra(c - T + 8, s0 + 4, 2 * T - 16, 22, false); }
       if (!hw || !hi.hwy) { if (e.h) zebra(s1 - 26, c - T + 8, 22, 2 * T - 16, true); else zebra(c - T + 8, s1 - 26, 2 * T - 16, 22, false); }
     }
@@ -222,9 +303,12 @@
   function buildSky() {
     skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide, depthWrite: false, fog: false,
-      uniforms: { top: { value: new THREE.Color(0x3b8cff) }, hor: { value: new THREE.Color(0xbfe3ff) }, bot: { value: new THREE.Color(0x1b3a5a) } },
+      uniforms: { top: { value: new THREE.Color(0x3b8cff) }, hor: { value: new THREE.Color(0xbfe3ff) }, bot: { value: new THREE.Color(0x1b3a5a) }, inv: { value: 0 }, expo: { value: 1 } },
       vertexShader: "varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
-      fragmentShader: "uniform vec3 top; uniform vec3 hor; uniform vec3 bot; varying vec3 vP; void main(){ float h = vP.y; vec3 c = h > 0.0 ? mix(hor, top, pow(clamp(h,0.0,1.0),0.6)) : mix(hor, bot, clamp(-h*4.0,0.0,1.0)); gl_FragColor = vec4(c,1.0); }",
+      // sky colours are display colours: with post-processing on, alpha 0 tells the composite to skip tone mapping here
+      fragmentShader: `uniform vec3 top; uniform vec3 hor; uniform vec3 bot; uniform float inv; uniform float expo; varying vec3 vP;
+        void main(){ float h = vP.y; vec3 c = h > 0.0 ? mix(hor, top, pow(clamp(h,0.0,1.0),0.6)) : mix(hor, bot, clamp(-h*4.0,0.0,1.0));
+          gl_FragColor = vec4(c, inv > 0.5 ? 0.0 : 1.0); }`,
     });
     const sky = new THREE.Mesh(new THREE.SphereGeometry(9000, 32, 16), skyMat); sky.renderOrder = -10; sky.frustumCulled = false; R.sky = sky; scene.add(sky);
     const sg = new THREE.BufferGeometry(), sp = [];
@@ -337,7 +421,7 @@
       list.forEach(([x, y, z, r], i) => { d.position.set(x, y, z); d.rotation.y = r; d.updateMatrix(); ac.setMatrixAt(i, d.matrix); });
       ac.castShadow = true; gr.add(ac);
     }
-    buildRegionProps();
+    buildRegionProps(); buildSignals();
     // fountain
     for (const s of W.decor) if (s.type === "fountain") {
       const basin = new THREE.Mesh(new THREE.CylinderGeometry(s.r, s.r + 2, 12, 32, 1, true), HM().mat("#cfc7bb")); basin.position.set(s.x, 6, s.y); basin.castShadow = true; scene.add(basin);
@@ -348,6 +432,46 @@
   }
   const signGlows = [];
   const beaconMat = new THREE.MeshBasicMaterial({ color: 0xff2030, toneMapped: false });
+  // ---------- traffic lights: a pole on the far-right corner of every approach, red / amber / green lamps ----------
+  const sigHeads = []; let sigT = 0;
+  const LAMP_ON = [new THREE.Color(6, 0.35, 0.25), new THREE.Color(5, 3.2, 0.2), new THREE.Color(0.3, 5, 1.6)], LAMP_OFF = [new THREE.Color(0.18, 0.03, 0.03), new THREE.Color(0.16, 0.11, 0.02), new THREE.Color(0.02, 0.13, 0.06)];
+  function buildSignals() {
+    const heads = [];
+    for (const n of W.signals) for (const id of n.nb) {
+      const m = W.nodes[id], dx = Math.sign(n.x - m.x), dy = Math.sign(n.y - m.y), rx = -dy, ry = dx; // approach direction (m -> n) and its right side
+      heads.push({ n, horiz: dx !== 0, x: n.x + dx * (T + 14) + rx * (T + 14), y: n.y + dy * (T + 14) + ry * (T + 14), face: Math.atan2(-dy, -dx) });
+    }
+    const poleGeo = new THREE.CylinderGeometry(0.9, 1.1, 34, 6), headGeo = new THREE.BoxGeometry(3.4, 10, 3.6), lampGeo = new THREE.SphereGeometry(1.25, 10, 8), visorGeo = new THREE.BoxGeometry(1.6, 0.5, 3);
+    const poleMat = HM().mat("#2b2e35", { metalness: 0.6, roughness: 0.45 }), headMat = HM().mat("#15161a", { roughness: 0.6 }), lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+    const d = new THREE.Object3D();
+    for (const [gr, list] of byChunk(heads)) {
+      const pole = new THREE.InstancedMesh(poleGeo, poleMat, list.length), head = new THREE.InstancedMesh(headGeo, headMat, list.length), visor = new THREE.InstancedMesh(visorGeo, headMat, list.length * 3), lamp = new THREE.InstancedMesh(lampGeo, lampMat, list.length * 3);
+      list.forEach((h, i) => {
+        d.rotation.set(0, 0, 0); d.scale.set(1, 1, 1); d.position.set(h.x, 17, h.y); d.updateMatrix(); pole.setMatrixAt(i, d.matrix);
+        d.rotation.set(0, -h.face, 0); d.position.set(h.x, 36, h.y); d.updateMatrix(); head.setMatrixAt(i, d.matrix);
+        const fx = Math.cos(h.face), fy = Math.sin(h.face);
+        for (let k = 0; k < 3; k++) {
+          d.position.set(h.x + fx * 1.6, 39.2 - k * 3.2, h.y + fy * 1.6); d.updateMatrix(); lamp.setMatrixAt(i * 3 + k, d.matrix); lamp.setColorAt(i * 3 + k, LAMP_OFF[k]);
+          d.position.set(h.x + fx * 2.3, 40.5 - k * 3.2, h.y + fy * 2.3); d.updateMatrix(); visor.setMatrixAt(i * 3 + k, d.matrix);
+        }
+        h.lamp = lamp; h.i = i; h.state = "";
+      });
+      pole.castShadow = head.castShadow = true; gr.add(pole, head, visor, lamp);
+      sigHeads.push(...list);
+    }
+  }
+  function updateSignals(dt) {
+    sigT -= dt; if (sigT > 0) return; sigT = 0.12;
+    const cx = camera.position.x, cz = camera.position.z, dirty = new Set();
+    for (const h of sigHeads) {
+      if (Math.abs(h.x - cx) > 1800 || Math.abs(h.y - cz) > 1800) continue;
+      const st = W.signalState(h.n, h.horiz, G.time); if (st === h.state) continue;
+      h.state = st; const on = st === "r" ? 0 : st === "y" ? 1 : 2;
+      for (let k = 0; k < 3; k++) h.lamp.setColorAt(h.i * 3 + k, k === on ? LAMP_ON[k] : LAMP_OFF[k]);
+      dirty.add(h.lamp);
+    }
+    for (const l of dirty) l.instanceColor.needsUpdate = true;
+  }
   // ---------- region props: bridges, highway gantries, harbour cranes ----------
   function buildRegionProps() {
     const concrete = HM().mat("#9a9ea6", { roughness: 0.85 }), steel = HM().mat("#b8bec8", { metalness: 0.7, roughness: 0.35 }), cable = HM().mat("#e8ecf2", { metalness: 0.6, roughness: 0.3 });
@@ -1117,10 +1241,10 @@
   };
 
   // ---------- frame ----------
-  let lastT = 0, frameDt = 1 / 60;
+  let lastT = 0, frameDt = 1 / 60, lastN01 = 0;
   R.draw = function (time, opts = {}) {
     const dt = clamp(time - lastT, 0, 0.1); lastT = time; frameDt = dt;
-    const n01 = lighting(G.state.hour, time);
+    const n01 = lighting(G.state.hour, time); lastN01 = n01;
     tagN = 0; tagPool.forEach((s) => (s.visible = false));
     updateCars(dt, n01, time);
     updatePeople(dt, time);
@@ -1139,8 +1263,8 @@
     // fountain spray
     if (R.fountain && Math.random() < 0.6 && Math.abs(R.fountain.x - cam3.tgt.x) < 900 && Math.abs(R.fountain.y - cam3.tgt.z) < 900) G.spawnFx("spark", R.fountain.x + rand(-3, 3), R.fountain.y + rand(-3, 3), { z: 30, vx: rand(-40, 40), vy: rand(-40, 40), vz: rand(80, 140), size: 2.5, life: 0.9, max: 0.9, color: "#bfe9ff" });
     drawFx(); drawRain(dt);
-    updateGround(false); updateStatics(dt);
-    renderer.render(scene, camera);
+    updateGround(false); updateStatics(dt); updateSignals(dt);
+    if (post) post.render(lastN01); else renderer.render(scene, camera);
     // screen-space overlays
     const vg = document.getElementById("vignette");
     if (vg) { const sp = P.car ? P.car.speed : Math.hypot(P.vx || 0, P.vy || 0); vg.style.opacity = clamp(0.55 + (sp - 380) / 600, 0.55, 1); }
