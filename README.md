@@ -65,6 +65,15 @@ mainland cities sit on the same road grid and are joined by highways:
 - **Two people, one car (online):** walk up to a friend's car or motorbike and press **F** to ride as their passenger. You sit in the passenger seat or on the pillion, the camera follows the car, and voice chat keeps working. Press **F** again to get out.
 - **Realistic cars:** a seated driver behind see-through glass, with seats, a dashboard and a steering wheel. Glasshouses taper inwards towards the roof, and the cars have alloy wheels, door mirrors, grilles and number plates. The SUV has roof rails and the pickup has an open bed.
 
+## 🎞️ Graphics: film look, people, traffic lights
+- **Post-processing:**
+  - The scene renders in HDR (half-float, 4× MSAA), then gets a 3-level bloom, ACES filmic tone mapping, colour grading (tinted shadows, warm highlights), a vignette and fine film grain.
+  - Neon, headlights, lit windows and the sun glow; bloom is stronger at night and in the rain.
+  - Nitro adds a subtle lens fringe.
+  - Turn it off with Phone → Settings → *Graphics: bloom + film look* (phones skip it automatically).
+- **Better people:** painted faces with eyes, brows and lips, a nose, a rounded head and pelvis, shoulders, t-shirt sleeves and six rounded hairstyles (short, buzz, long, bun, curly, quiff). All existing animations still work.
+- **Traffic lights:** 156 signalled junctions across all four cities on a 20-second cycle (green, amber, all-red). AI traffic brakes to the white stop line on red, decides on amber whether there's room to stop, queues behind the car in front and clears the junction once it's past the line. The lamps glow through the bloom at night.
+
 ## 📸 Realism pass
 - **Reflections:** every 2 seconds the sky, sun and a band of city neon are rendered into an environment map. Car paint (clear-coat), glass, chrome hubs, the sea and wet roads reflect it, so reflections follow the time of day.
 - **Rain that soaks the city:** roads turn dark and glossy as it rains and mirror headlights and neon. They dry out slowly afterwards, not all at once.

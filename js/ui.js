@@ -311,6 +311,7 @@
       { label: "Pedestrians", right: S.peds, act: () => { S.peds = S.peds >= 70 ? 10 : S.peds + 15; refresh(); } },
       { label: "Character voices (TTS)", right: S.voices ? "ON" : "OFF", act: () => { S.voices = !S.voices; refresh(); } },
       { label: "Gearbox", right: S.manual ? "MANUAL" : "AUTOMATIC", act: () => { S.manual = !S.manual; if (P.car) { P.car.gear = 1; P.car.shiftT = 0; } refresh(); } },
+      { label: "Graphics: bloom + film look", right: S.post === false ? "OFF" : "ON", act: () => { G.render.setPost(S.post === false); refresh(); } },
     ];
     const refresh = () => { const sel = menu ? menu.sel : 0; phoneMenu("Settings", items()); menu.sel = sel; renderMenu(); };
     phoneMenu("Settings", items());

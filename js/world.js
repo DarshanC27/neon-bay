@@ -446,6 +446,17 @@
     }
   }
   W.node = (i, j) => latNode.get(j * 64 + i);
+  // ----- traffic lights at every city junction with 3+ roads: 20 s cycle (green 7.4, amber 1.8, all-red 0.8 per axis) -----
+  const SIG_CYCLE = (W.SIG_CYCLE = 20);
+  W.signals = [];
+  for (const n of nodes) if (!n.hwy && n.nb.length >= 3 && W.cityAt(n.x, n.y)) { n.sig = { off: ((n.i * 7 + n.j * 13) % 10) * 1.9 }; W.signals.push(n); }
+  // state of the light facing traffic that moves along x (horiz) or along y at junction n, at time t: "g" | "y" | "r"
+  W.signalState = (n, horiz, t) => {
+    if (!n.sig) return "g";
+    const p = (((t + n.sig.off) % SIG_CYCLE) + SIG_CYCLE) % SIG_CYCLE, mine = horiz ? p < SIG_CYCLE / 2 : p >= SIG_CYCLE / 2;
+    if (!mine) return "r";
+    const q = p % (SIG_CYCLE / 2); return q < 7.4 ? "g" : q < 9.2 ? "y" : "r";
+  };
   W.nearestNode = (x, y) => {
     if (x < N0 * T && y < N0 * T) { // inside Neon Bay: the old exact lattice snap
       let bi = 0, bj = 0;
