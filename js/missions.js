@@ -32,7 +32,7 @@
       steps: [
         { text: "Get a car (walk up to one and press F)", done: () => !!P.car },
         { text: "Drive to the SPRAY SHACK", target: () => poi("spray"), done: () => inCarNear(poi("spray").x, poi("spray").y, 90, 120),
-          after: () => { P.car.color = pick(["#ff3df2", "#22d3ee", "#ffd60a", "#19f5a0"]); P.car.hp = P.car.s.hp; P.car.dents = []; G.clearWanted(); } },
+          after: () => { P.car.color = pick(["#ff3df2", "#22d3ee", "#ffd60a", "#19f5a0"]); P.car.hp = P.car.s.hp; P.car.dents = []; P.car.crush = null; G.clearWanted(); } },
       ],
       outro: [["Vince", "Fresh paint, fresh start. Come by The Velvet when you're ready for real work."]],
     },
@@ -143,6 +143,7 @@
     const m = M.active;
     if (m) {
       if (m.kind === "op") return G.campaign.markers(m);
+      if (m.kind === "job") return G.jobs.markers(m);
       if (m.kind === "story") { const s = m.def.steps[m.step]; const t = s.target && s.target(m); if (t) out.push({ x: t.x, y: t.y, color: "#ffd60a", r: 60, icon: "★", main: true }); }
       if (m.kind === "delivery") out.push({ x: m.target.x, y: m.target.y, color: "#ffa028", r: 70, icon: "📦", main: true });
       if (m.kind === "ride") { if (m.stage === "pickup" && m.ped) out.push({ x: m.ped.x, y: m.ped.y, color: "#ffd60a", r: 50, icon: "🙋", main: true }); else if (m.target) out.push({ x: m.target.x, y: m.target.y, color: "#19f5a0", r: 70, icon: "🏁", main: true }); }
@@ -150,6 +151,8 @@
       return out;
     }
     out.push(...G.campaign.available());
+    if (G.jobs) out.push(...G.jobs.available());
+    if (G.ems) out.push(...G.ems.available());
     if (G.state.story < STORY.length) out.push({ x: poi("velvet").x, y: poi("velvet").y, color: "#ffd60a", r: 46, icon: "★", label: `E: Story: ${STORY[G.state.story].name}`, act: startStory });
     out.push({ x: poi("depot").x, y: poi("depot").y, color: "#ffa028", r: 46, icon: "📦", label: "E: Start a courier job", act: startDelivery });
     W.raceRoutes.forEach((r, i) => out.push({ x: r.start.x, y: r.start.y, color: r.color, r: 56, icon: "🏁", label: `E: Street race: ${r.name} (${fmtMoney(r.reward)})`, act: () => startRace(i) }));
@@ -180,6 +183,7 @@
       if (m.timer <= 0) return fail("Out of time");
     }
     if (m.kind === "op") return G.campaign.update(m, dt);
+    if (m.kind === "job") return G.jobs.update(m, dt);
     if (m.kind === "story") {
       const s = m.def.steps[m.step];
       const bad = s.check && s.check(m); if (bad) return fail(bad);
@@ -252,8 +256,9 @@
     if (e.type === "racerFinish" && M.active && M.active.kind === "race") M.active.finished.push(e.car);
   };
   function nearestCarPrompt() {
-    for (const c of G.cars) if (!c.wrecked && c.driver !== "racer" && dist(c.x, c.y, P.x, P.y) < 64)
-      return `F: ${c.driver === "ai" ? "Carjack" : c.driver === "police" ? "Steal police" : "Enter"} ${c.s.name}`;
+    for (const c of G.cars) if (!c.wrecked && c.driver !== "racer" && dist(c.x, c.y, P.x, P.y) < (c.s.air || c.s.boat ? 85 : 64) && Math.abs((P.z || 0) - c.z) < 14)
+      return `F: ${c.driver === "ai" ? "Carjack" : c.driver === "police" ? "Steal police" : c.driver === "ems" ? "Steal" : c.s.air ? "Fly" : c.s.boat ? "Board" : c.s.bike ? "Ride" : "Enter"} ${c.s.name}`;
+    if (G.net && G.net.on) for (const q of G.net.peers.values()) if (q.vis && q.car && !q.car.s.pedal && dist(q.car.x, q.car.y, P.x, P.y) < 70 && Math.abs(q.car.z - (P.z || 0)) < 20) return `F: Ride with ${q.name}`;
     return null;
   }
 })();

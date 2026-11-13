@@ -43,6 +43,10 @@
     const prng = mulberry32(42);
     for (const s of W.parkingSpots) if (prng() < 0.6) { const c = new G.Car(pick(["sedan", "compact", "compact", "muscle", "van", "sedan"]), s.x, s.y, s.a); c.keep = true; c.parked = true; G.cars.push(c); }
     const sh = W.pois.safehouse; const starter = new G.Car("compact", sh.x + 90, sh.y - 60, 0, "#ffb703"); starter.keep = true; starter.starter = true; G.cars.push(starter);
+    // helicopters on helipads, boats at the marinas, one helicopter on the police roof
+    for (const k in W.helipads) { const h = W.helipads[k]; const c = new G.Car("heli", h.x, h.y, h.a); c.keep = true; c.parked = true; G.cars.push(c); }
+    for (const k in W.marinas) { const m = W.marinas[k]; for (const off of [0, 70]) { const c = new G.Car("boat", m.x + (m.a === 0 ? off : 0), m.y + (m.a === 0 ? 0 : off), m.a); c.keep = true; c.parked = true; G.cars.push(c); } }
+    { const pb = W.buildings.find((b) => b.helipad); if (pb) { const c = new G.Car("heli", pb.x + pb.w / 2, pb.y + pb.h / 2, 0, "#0b132b"); c.z = pb.h3; c.keep = true; c.parked = true; G.cars.push(c); } }
     for (const [t, dx] of [["sportbike", 30], ["bicycle", 58]]) { const bk = new G.Car(t, sh.x + dx, sh.y - 18, Math.PI / 2); bk.keep = true; bk.parked = true; G.cars.push(bk); } // on the pavement by the door
     for (const s of W.parkingSpots) if (prng() < 0.12) { const bk = new G.Car(prng() < 0.6 ? "sportbike" : "bicycle", s.x + 28, s.y, s.a); bk.keep = true; bk.parked = true; if (!G.cars.some((c) => dist(c.x, c.y, bk.x, bk.y) < 30)) G.cars.push(bk); }
     G.populateInitial();
@@ -110,6 +114,7 @@
       if (c.driver === "ai") G.trafficAI(c, dt);
       else if (c.driver === "police") G.policeAI(c, dt);
       else if (c.driver === "racer") G.racerAI(c, dt);
+      else if (c.driver === "ems" && G.ems) G.ems.drive(c, dt);
       else if (!c.driver) { c.ctrl.t = 0; c.ctrl.s = 0; c.ctrl.hb = true; }
     }
     const env = { grip: 1 - wx.rain * 0.22 };
@@ -118,7 +123,7 @@
       c.update(dt, env);
       if (c.wrecked) c.wreckT += dt;
       // skid marks + tyre smoke
-      if (c.z === 0 && c.slip > 115 && c.speed > 70 && Math.abs(c.x - tgt.x) < 1100) {
+      if (c.z === 0 && ((c.slip > 115 && c.speed > 70) || (c.wheelspin > 0.25 && c.speed > 4)) && !c.s.boat && !c.s.air && Math.abs(c.x - tgt.x) < 1100) {
         const bx = -Math.cos(c.a) * c.s.w * 0.35, by = -Math.sin(c.a) * c.s.w * 0.35, rx = -Math.sin(c.a) * c.s.h * 0.38, ry = Math.cos(c.a) * c.s.h * 0.38;
         for (const sgn of [1, -1]) G.skids.push([ox + bx + rx * sgn, oy + by + ry * sgn, c.x + bx + rx * sgn, c.y + by + ry * sgn]);
         if (G.skids.length > 2400) G.skids.splice(0, 200);
@@ -130,13 +135,15 @@
     }
     // world + car-car collisions
     for (const c of G.activeCars) {
+      if (c.s.air || c.s.boat || c.towed) continue; // they handle their own collisions (buildings / the shoreline); towed wrecks ride on their truck
       const imp = G.collideWorld(c, c.circles(), c.z);
-      if (imp > 90) crash(c, null, imp);
+      if (imp > 90) { c.hitFrom(c.hitNx || 0, c.hitNy || 0, imp); crash(c, null, imp); }
     }
     const A = G.activeCars;
     for (let i = 0; i < A.length; i++) for (let j = i + 1; j < A.length; j++) {
+      if (A[i].towedBy === A[j] || A[j].towedBy === A[i]) continue;
       const imp = G.collideCars(A[i], A[j]);
-      if (imp > 70) crash(A[i], A[j], imp);
+      if (imp > 70) { const dx = A[j].x - A[i].x, dy = A[j].y - A[i].y, d = Math.hypot(dx, dy) || 1; A[i].hitFrom(dx / d, dy / d, imp); A[j].hitFrom(-dx / d, -dy / d, imp); crash(A[i], A[j], imp); }
     }
     // other online players' cars and bodies
     if (G.net && G.net.on && !attract) G.net.collide((imp, rc) => {
@@ -176,9 +183,10 @@
       for (const p of G.peds) {
         const d = dist(c.x, c.y, p.x, p.y);
         if (d < 120 && c.speed > 180 && p.state === "walk") { const f = (p.x - c.x) * Math.cos(c.a) + (p.y - c.y) * Math.sin(c.a); if (f > 0) G.scarePed(p, c.x, c.y); }
-        if (d < c.s.h / 2 + 12 && p.state !== "down") {
+        if (d < c.s.h / 2 + 12 && p.state !== "down" && !p.crew) {
           if (c.speed > 90) {
             p.state = "down"; p.timer = 3; p.x += Math.cos(c.a) * 20; p.y += Math.sin(c.a) * 20;
+            if (c.speed > 170 && !p.crew) { p.injured = true; p.timer = 45; }
             if (c === P.car) { if (G.time - (P.lastPedHit || -99) > 4) { G.crime(1, "Hit a pedestrian", 3); P.lastPedHit = G.time; } c.damage(3); }
           } else { p.x += (p.x - c.x) / (d || 1) * 6; p.y += (p.y - c.y) / (d || 1) * 6; }
         }
@@ -210,6 +218,7 @@
     }
     if (P.car) { G.stats.distance += P.car.speed * dt * 0.1; G.stats.topSpeed = Math.max(G.stats.topSpeed, P.car.speed); }
     if (!attract) { G.updateWanted(dt); G.missions.update(dt); }
+    if (G.ems) G.ems.update(dt);
     spawnT -= dt; if (spawnT <= 0) { spawnT = 0.2; G.manageSpawns(); }
     G.render.updateFx(dt);
   }
@@ -242,7 +251,8 @@
       else if (Input.hit("KeyP", "Tab")) { G.render.releaseMouse(); G.ui.togglePhone(true); }
       else if (Input.hit("Escape")) G.ui.togglePause(true);
       if (Input.hit("KeyQ")) G.audio.cycleStation();
-      if (Input.hit("KeyC") && !P.car) G.heroes.cycle();
+      if (Input.hit("KeyC") && !P.car && !P.ride) G.heroes.cycle();
+      else if (Input.hit("KeyC")) { S.camMode = ((S.camMode || 0) + 1) % 3; G.ui.toast(["Chase camera", "Far chase camera", "Cockpit view (mouse to glance)"][S.camMode], "#22d3ee"); }
       if (Input.hit("A_cancel") && G.missions.active) G.missions.cancel();
       if (Input.hit("A_crimson")) { if (P.car) G.ui.toast("Get out of the car to suit up", "#ff1f3d"); else G.heroes.crimson(); }
       if (Input.hit("A_agent")) G.agents.openSelect();

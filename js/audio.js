@@ -8,6 +8,8 @@
     { name: "BASS DRIVE · drum and bass", bpm: 172, dj: "Bass Drive! One seventy two beats per minute. Don't get a ticket." },
   ];
   let master, sfxBus, musicBus, noiseBuf, eng = null, screech = null, siren = null, sched = null, step = 0, nextT = 0;
+  let amb = null, traf = null, verb = null, encT = 0, birdT = 2, crickT = 1, prevLoad = 0;
+  const SOUND = 2058; // speed of sound in game units/s (343 m/s), for the Doppler shift
 
   A.init = function () {
     if (A.ctx) { A.ctx.resume(); return; }
@@ -21,19 +23,41 @@
     musicBus.connect(dl); dl.connect(fb); fb.connect(dl); dl.connect(wet); wet.connect(comp);
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    // engine: two oscillators through a lowpass
-    const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), lp = ctx.createBiquadFilter(), eg = ctx.createGain();
-    o1.type = "sawtooth"; o2.type = "square"; lp.type = "lowpass"; lp.frequency.value = 600; eg.gain.value = 0;
-    o1.connect(lp); o2.connect(lp); lp.connect(eg); eg.connect(sfxBus); o1.start(); o2.start();
-    eng = { o1, o2, lp, g: eg };
+    const loopNoise = () => { const n = ctx.createBufferSource(); n.buffer = noiseBuf; n.loop = true; n.start(0, Math.random() * 1.9); return n; };
+    const filt = (type, f, q = 0.7) => { const b = ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; };
+    const gain = (v = 0) => { const g = ctx.createGain(); g.gain.value = v; return g; };
+    // reverb: a generated impulse response; how much of it you hear depends on how enclosed the street is
+    const ir = ctx.createBuffer(2, ctx.sampleRate * 1.6, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) { const d2 = ir.getChannelData(ch); for (let i = 0; i < d2.length; i++) d2[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d2.length, 3.2) * (i < 600 ? i / 600 : 1); }
+    const conv = ctx.createConvolver(); conv.buffer = ir; const revG = gain(0.06); sfxBus.connect(conv); conv.connect(revG); revG.connect(comp);
+    verb = { g: revG };
+    // engine: firing-order harmonics (saw + sub square + a little whine) -> lowpass -> soft-clip that bites harder under load,
+    // plus combustion noise around the 3rd harmonic
+    const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), o3 = ctx.createOscillator(), lp = ctx.createBiquadFilter(), eg = ctx.createGain();
+    o1.type = "sawtooth"; o2.type = "square"; o3.type = "sine"; lp.type = "lowpass"; lp.frequency.value = 600; eg.gain.value = 0;
+    const o3g = gain(0.18), drive = gain(1), shaper = ctx.createWaveShaper(), curve = new Float32Array(1024);
+    for (let i = 0; i < 1024; i++) { const x = (i / 1023) * 2 - 1; curve[i] = Math.tanh(x * 2.2); }
+    shaper.curve = curve; shaper.oversample = "2x";
+    const cn = loopNoise(), cbp = filt("bandpass", 300, 1.4), cng = gain(0);
+    o1.connect(lp); o2.connect(lp); o3.connect(o3g); o3g.connect(lp); cn.connect(cbp); cbp.connect(cng); cng.connect(lp);
+    lp.connect(drive); drive.connect(shaper); shaper.connect(eg); eg.connect(sfxBus); o1.start(); o2.start(); o3.start();
+    eng = { o1, o2, o3, lp, g: eg, drive, cbp, cng };
+    // tyres on the road (rumble), wind at speed, rain hiss, the city's distant traffic bed
+    const mk = (type, f, q) => { const n = loopNoise(), b = filt(type, f, q), g = gain(0); n.connect(b); b.connect(g); g.connect(sfxBus); return { b, g }; };
+    amb = { road: mk("lowpass", 300), wind: mk("bandpass", 700, 0.6), rain: mk("highpass", 2600), wet: mk("bandpass", 3800, 0.8), city: mk("lowpass", 220) };
+    // the nearest other car going past: its own engine note, panned and Doppler-shifted
+    const to = ctx.createOscillator(), tlp = filt("lowpass", 500), tg = gain(0), tp = ctx.createStereoPanner ? ctx.createStereoPanner() : gain(1);
+    to.type = "sawtooth"; to.connect(tlp); tlp.connect(tg); tg.connect(tp); tp.connect(sfxBus); to.start();
+    traf = { o: to, lp: tlp, g: tg, pan: tp };
     // tire screech: looped noise through bandpass
     const sn = ctx.createBufferSource(); sn.buffer = noiseBuf; sn.loop = true;
     const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 2400; bp.Q.value = 6;
     const sg = ctx.createGain(); sg.gain.value = 0; sn.connect(bp); bp.connect(sg); sg.connect(sfxBus); sn.start();
     screech = { g: sg, bp };
-    // siren
-    const so = ctx.createOscillator(), sgn = ctx.createGain(); so.type = "triangle"; sgn.gain.value = 0; so.connect(sgn); sgn.connect(sfxBus); so.start();
-    siren = { o: so, g: sgn };
+    // siren: wail / yelp sweep, distance lowpass, stereo pan and Doppler
+    const so = ctx.createOscillator(), slp = ctx.createBiquadFilter(), sgn = ctx.createGain(), sp = ctx.createStereoPanner ? ctx.createStereoPanner() : ctx.createGain();
+    so.type = "triangle"; slp.type = "lowpass"; slp.frequency.value = 6000; sgn.gain.value = 0; so.connect(slp); slp.connect(sgn); sgn.connect(sp); sp.connect(sfxBus); so.start();
+    siren = { o: so, g: sgn, lp: slp, pan: sp };
     A.on = true;
     sched = setInterval(schedule, 25);
   };
@@ -55,6 +79,7 @@
     const lo = RATIOS[g - 1] * 0.8, hi = RATIOS[g];
     let target = 900 + clamp((k - lo) / (hi - lo), 0, 1) * 6300;
     if (c.slip > 120 && c.z === 0) target += Math.min(1400, c.slip * 2.2);
+    if (c.wheelspin > 0.25 && c.z === 0) target += Math.min(2200, (c.wheelspin - 0.25) * 1800); // launch wheelspin flares the revs
     if ((c.ctrl.t || 0) > 0 && sp < 20) target = 2600; // launch revs
     if (target > 7100) target = 7100 - Math.abs(Math.sin(G.time * 40)) * 300; // limiter bounce
     st.rpm += (target - st.rpm) * Math.min(1, dt * (st.shift > 0 ? 25 : 10));
@@ -65,22 +90,86 @@
   A.setMusic = (v) => { A.musicVol = v; if (musicBus) musicBus.gain.value = v * 0.5; };
 
   // ---------- engine / ambience per frame ----------
+  // where a sound is relative to the listener: stereo pan from the camera's right vector, Doppler from the closing speed
+  function spatial(src, L) {
+    const dx = src.x - L.x, dy = src.y - L.y, d = Math.hypot(dx, dy) || 1, nx = dx / d, ny = dy / d;
+    let pan = 0; const cam = G.render && G.render.camera;
+    if (cam) { const e = cam.matrixWorld.elements; pan = clamp(nx * e[0] + ny * e[2], -1, 1) * 0.85; }
+    const vs = -((src.vx || 0) * nx + (src.vy || 0) * ny), vl = (L.vx || 0) * nx + (L.vy || 0) * ny; // source closing in / listener closing in
+    return { d, pan, dop: clamp((SOUND + vl) / Math.max(200, SOUND - vs), 0.6, 1.6) };
+  }
+  function chirp(t0, pan) { // a songbird: a few quick rising/falling whistles
+    const ctx = A.ctx, n = randi(3, 6);
+    for (let i = 0; i < n; i++) { const t = t0 + i * rand(0.07, 0.13), o = ctx.createOscillator(), g = ctx.createGain(), f = rand(2600, 4200);
+      o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * rand(0.7, 1.4), t + 0.06);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.018, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+      const p = ctx.createStereoPanner ? ctx.createStereoPanner() : ctx.createGain(); if (p.pan) p.pan.value = pan;
+      o.connect(g); g.connect(p); p.connect(sfxBus); o.start(t); o.stop(t + 0.1); }
+  }
+  function trill(t0) { // crickets at night
+    const ctx = A.ctx, o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = rand(4300, 4900); g.gain.value = 0.0001;
+    for (let i = 0; i < 9; i++) { const t = t0 + i * 0.045; g.gain.setValueAtTime(0.009, t); g.gain.setValueAtTime(0.0001, t + 0.025); }
+    o.connect(g); g.connect(sfxBus); o.start(t0); o.stop(t0 + 0.45);
+  }
+  function pops(t0, n) { for (let i = 0; i < n; i++) noise(0.04, rand(0.12, 0.3), rand(700, 1500), "lowpass", t0 + rand(0.03, 0.45)); } // exhaust crackle on the overrun
+
+  // ---------- engine / ambience per frame ----------
   A.update = function (dt) {
     if (!A.ctx) return;
-    const t = A.ctx.currentTime, P = G.player, c = P.car;
+    const t = A.ctx.currentTime, P = G.player, c = P.car, L = c || P, wx = G.weather || { rain: 0 };
+    const spd = c ? c.speed : 0, grounded = c && !c.s.air && !c.s.boat && c.z === 0;
     if (c && !c.wrecked && !c.s.pedal) {
-      const e = A.engineNote(c, dt);
-      eng.o1.frequency.setTargetAtTime(e.f, t, 0.03); eng.o2.frequency.setTargetAtTime(e.f * 0.5, t, 0.03);
+      // helicopter: a low rotor chop that speeds up with the rotor; everything else: the engine model
+      const e = c.s.air ? { f: 14 + c.rotor * 16 + c.speed * 0.015, rpm01: c.rotor * 0.35, load: 0.5 + Math.abs(c.ctrl.lift || 0) * 0.4, shift: 0 } : A.engineNote(c, dt);
+      eng.o1.frequency.setTargetAtTime(e.f, t, 0.03); eng.o2.frequency.setTargetAtTime(e.f * 0.5, t, 0.03); eng.o3.frequency.setTargetAtTime(e.f * 2.01, t, 0.03);
       eng.lp.frequency.setTargetAtTime(300 + e.load * 1500 + e.rpm01 * 900 + (c.ctrl.boost ? 900 : 0), t, 0.06);
-      eng.g.gain.setTargetAtTime((0.07 + e.load * 0.1) * (e.shift > 0 ? 0.35 : 1), t, e.shift > 0 ? 0.02 : 0.08);
-      const sl = c.z > 0 ? 0 : clamp((c.slip - 70) / 220, 0, 1) * (c.speed > 60 ? 1 : 0);
+      eng.drive.gain.setTargetAtTime(0.8 + e.load * 2.2 + e.rpm01, t, 0.05);
+      eng.cbp.frequency.setTargetAtTime(Math.max(80, e.f * 3), t, 0.05); eng.cng.gain.setTargetAtTime(e.load * (0.15 + e.rpm01 * 0.35), t, 0.05);
+      eng.g.gain.setTargetAtTime((0.06 + e.load * 0.08) * (e.shift > 0 ? 0.35 : 1), t, e.shift > 0 ? 0.02 : 0.08);
+      if (!c.s.air && prevLoad > 0.6 && e.load < 0.05 && e.rpm01 > 0.45) pops(t, randi(2, 6));
+      prevLoad = e.load;
+      const sl = c.z > 0 ? 0 : Math.max(clamp((c.slip - 70) / 220, 0, 1) * (c.speed > 60 ? 1 : 0), clamp(((c.wheelspin || 0) - 0.25) * 1.5, 0, 1));
       screech.g.gain.setTargetAtTime(sl * 0.22, t, 0.05);
-    } else { eng.g.gain.setTargetAtTime(0, t, 0.15); screech.g.gain.setTargetAtTime(0, t, 0.05); }
-    let nearCop = Infinity;
-    for (const k of G.cars) if (k.siren) nearCop = Math.min(nearCop, dist(k.x, k.y, P.x, P.y));
-    const sv = nearCop < 900 ? (1 - nearCop / 900) * 0.07 : 0;
-    siren.g.gain.setTargetAtTime(sv, t, 0.2);
-    siren.o.frequency.setTargetAtTime(Math.sin(t * 5) > 0 ? 960 : 720, t, 0.05);
+    } else { eng.g.gain.setTargetAtTime(0, t, 0.15); screech.g.gain.setTargetAtTime(0, t, 0.05); prevLoad = 0; }
+    // tyres, wind, rain
+    const k = Math.min(1, spd / 600), rough = grounded && G.world.tileAt && [G.world.TT.DIRT, G.world.TT.SAND, G.world.TT.GRASS].includes(G.world.tileAt(c.x, c.y)) ? 2.2 : 1;
+    amb.road.g.gain.setTargetAtTime(grounded ? Math.min(0.16, k * 0.14 * rough) : 0, t, 0.1); amb.road.b.frequency.setTargetAtTime(150 + spd * 1.2 * rough, t, 0.1);
+    amb.wind.g.gain.setTargetAtTime(c ? k * k * 0.18 : 0, t, 0.15); amb.wind.b.frequency.setTargetAtTime(500 + spd * 1.5, t, 0.15);
+    amb.wet.g.gain.setTargetAtTime(grounded ? wx.rain * Math.min(1, spd / 250) * 0.09 : 0, t, 0.15);
+    amb.rain.g.gain.setTargetAtTime(wx.rain * (c ? 0.05 : 0.09), t, 0.4);
+    // the city: distant traffic hum (busier with more cars about, quieter at night), birds by day, crickets at night
+    const hr = G.state ? G.state.hour : 12, night = hr < 5.5 || hr > 20.5, near = (G.activeCars || []).length;
+    amb.city.g.gain.setTargetAtTime((0.012 + Math.min(0.04, near * 0.0025)) * (night ? 0.5 : 1), t, 0.8);
+    if (wx.rain < 0.3 && spd < 120) {
+      if (!night && (birdT -= dt) <= 0) { birdT = rand(1.5, 6); chirp(t + 0.05, rand(-0.8, 0.8)); }
+      if (night && (crickT -= dt) <= 0) { crickT = rand(0.4, 1.6); trill(t + 0.02); }
+    }
+    // echo off buildings: sample the skyline around the listener a few times a second
+    if ((encT -= dt) <= 0 && G.world.groundAt) {
+      encT = 0.4; let hit = 0, n = 0;
+      for (let i = 0; i < 8; i++) for (const r of [80, 170]) { const a = (i / 8) * TAU; n++; if (G.world.groundAt(L.x + Math.cos(a) * r, L.y + Math.sin(a) * r)[0] > 45) hit++; }
+      verb.g.gain.setTargetAtTime(0.04 + (hit / n) * 0.42, t, 0.5);
+    }
+    // sirens: nearest one, with a wail (police) or a fast yelp (ambulance / fire), Doppler and pan
+    let sc = null, sd = Infinity;
+    for (const q of G.cars) if (q.siren) { const d = dist(q.x, q.y, L.x, L.y); if (d < sd) { sd = d; sc = q; } }
+    if (sc && sd < 1100) {
+      const sp = spatial(sc, L), fast = sc.s.ems, base = fast ? 700 + 550 * (0.5 + 0.5 * Math.sin(t * TAU * 3)) : 650 + 800 * (0.5 - 0.5 * Math.cos(t * TAU / 3.6));
+      siren.g.gain.setTargetAtTime(Math.pow(1 - sd / 1100, 1.6) * 0.09, t, 0.15);
+      siren.o.frequency.setTargetAtTime(base * sp.dop, t, 0.03);
+      siren.lp.frequency.setTargetAtTime(Math.max(900, 7000 - sd * 6), t, 0.2);
+      if (siren.pan.pan) siren.pan.pan.setTargetAtTime(sp.pan, t, 0.1);
+    } else siren.g.gain.setTargetAtTime(0, t, 0.2);
+    // the nearest other moving car
+    let tc = null, td = 420;
+    for (const q of G.activeCars || []) if (q !== c && q.driver && !q.wrecked && q.speed > 30 && !q.s.pedal) { const d = dist(q.x, q.y, L.x, L.y); if (d < td) { td = d; tc = q; } }
+    if (tc) {
+      const sp = spatial(tc, L);
+      traf.o.frequency.setTargetAtTime((28 + tc.speed * 0.11) * sp.dop, t, 0.05);
+      traf.lp.frequency.setTargetAtTime(Math.max(250, 1400 - td * 2.4), t, 0.1);
+      traf.g.gain.setTargetAtTime(Math.pow(1 - td / 420, 2) * 0.05 * (0.4 + Math.min(1, tc.speed / 260)), t, 0.08);
+      if (traf.pan.pan) traf.pan.pan.setTargetAtTime(sp.pan, t, 0.08);
+    } else traf.g.gain.setTargetAtTime(0, t, 0.2);
   };
 
   // ---------- one-shot SFX ----------

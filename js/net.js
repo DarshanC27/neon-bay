@@ -177,7 +177,7 @@
       }
     } else if (o.dt > 0) { // no newer packet yet: keep moving the way they were going for a moment
       out.x = a.x + (a.vx || 0) * o.dt; out.y = a.y + (a.vy || 0) * o.dt;
-      if (a.c) { const c = (out.c = Object.assign({}, a.c)); c.x += c.vx * o.dt; c.y += c.vy * o.dt; c.z = Math.max(0, c.z + c.vz * o.dt - 490 * o.dt * o.dt * (c.z > 0 ? 1 : 0)); }
+      if (a.c) { const c = (out.c = Object.assign({}, a.c)); c.x += c.vx * o.dt; c.y += c.vy * o.dt; const air = G.CAR_TYPES[c.t] && G.CAR_TYPES[c.t].air; c.z = Math.max(0, c.z + c.vz * o.dt - (air ? 0 : 490 * o.dt * o.dt * (c.z > 0 ? 1 : 0))); } // helicopters hover: no gravity
     }
     return out;
   }
@@ -203,6 +203,7 @@
         c.x += (sc.x - c.x) * kk; c.y += (sc.y - c.y) * kk; c.z = sc.z; c.a = lerpAng(c.a, sc.a, kk);
         c.vx = sc.vx; c.vy = sc.vy; c.vz = sc.vz; c.vF = sc.vF; c.speed = Math.hypot(sc.vx, sc.vy); c.ctrl.s = sc.st; c.ctrl.boost = !!sc.bo;
         c.braking = !!sc.br; c.siren = !!sc.si; c.wrecked = !!sc.w; c.color = sc.col;
+        if (c.s.air) c.rotor = clamp(c.rotor + (c.wrecked ? -0.25 : 0.5) * dt, 0, 1); // remote helicopters aren't simulated here: spin the rotor for the renderer
         p.x = c.x; p.y = c.y; p.z = c.z;
         if (c.ctrl.boost && Math.random() < 0.5) G.spawnFx("spark", c.x - Math.cos(c.a) * 26, c.y - Math.sin(c.a) * 26, { vx: -Math.cos(c.a) * 120, vy: -Math.sin(c.a) * 120, size: 4, life: 0.3, max: 0.3, color: Math.random() < 0.5 ? "#22d3ee" : "#c77dff" });
       } else p.car = null;
@@ -224,7 +225,7 @@
     let best = null, bd = 70;
     for (const p of N.peers.values()) {
       if (!p.vis || !p.car || p.car.wrecked || p.car.s.pedal) continue;
-      const d = dist(p.car.x, p.car.y, P.x, P.y); if (d < bd && seatFree(p)) { best = p; bd = d; }
+      const d = dist(p.car.x, p.car.y, P.x, P.y); if (d < bd && Math.abs(p.car.z - (P.z || 0)) < 20 && seatFree(p)) { best = p; bd = d; }
     }
     if (!best) return false;
     P.ride = { id: best.id }; P.vx = P.vy = 0; G.audio.sfx("door"); G.heroes.reset && G.heroes.reset();
@@ -234,7 +235,7 @@
   N.leaveRide = function (msg) {
     const p = P.ride && N.peers.get(P.ride.id), c = p && p.car; P.ride = null;
     if (c) { const lx = -Math.sin(c.a), ly = Math.cos(c.a); let x = c.x + lx * 30, y = c.y + ly * 30; if (G.world.pointBlocked(x, y, 8)) { x = c.x - lx * 30; y = c.y - ly * 30; } P.x = x; P.y = y; }
-    P.z = 0; P.vx = P.vy = 0; G.audio.sfx("door"); if (msg) G.ui.toast(msg, "#8d99ae"); sendState();
+    P.z = c ? c.z : P.z || 0; P.vz = 0; P.vx = P.vy = 0; G.audio.sfx("door"); if (msg) G.ui.toast(msg, "#8d99ae"); sendState();
   };
   N.rideCar = () => { if (!P.ride) return null; const p = N.peers.get(P.ride.id); return p && p.vis && p.car ? p.car : null; };
   function rideUpdate() {
@@ -291,7 +292,9 @@
     }
     return any;
   };
+  N.evt = (to, data) => send({ type: "evt", to, data });
   function onEvt(from, d) {
+    if (d && d.k === "heist" && G.state.started && G.jobs) return G.jobs.onNet(from, d); // co-op heist sync (any game mode)
     if (!d || !G.state.started || G.state.mode !== "play") return;
     const p = N.peers.get(from), who = p ? p.name : "Someone";
     if (d.k === "punch" && !P.car) {

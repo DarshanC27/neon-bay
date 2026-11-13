@@ -36,13 +36,14 @@
     return { x: 0, y: 0, a: 0, vx: 0, vy: 0, walk: rand(10), skin: pick(SKIN), shirt: pick(SHIRTS), pants: pick(PANTS), hair: pick(HAIR),
       state: "walk", speed: rand(36, 62), bx, by, s, dir: Math.random() < 0.5 ? 1 : -1, off: rand(-14, 14), timer: 0, bubble: 0 };
   }
-  G.makePed = makePed;
+  G.makePed = makePed; G.obstacleAhead = (car, range) => obstacleAhead(car, range);
   function blockOfPoint(x, y) { return [clamp(Math.floor((x / T - 4) / 12), 0, W.NB - 1), clamp(Math.floor((y / T - 4) / 12), 0, W.NB - 1)]; }
   const isBlock = (bx, by) => !!W.blockAt(bx, by); // a city block (pedestrians only walk around those)
 
   G.updatePed = function (p, dt) {
     p.bubble = Math.max(0, p.bubble - dt);
     if (p.state === "wait") { p.bubble = 0.5; return; }
+    if (p.crew) return; // paramedics / firefighters / tow drivers: emergency.js moves them
     if (p.state === "down") { p.timer -= dt; if (p.timer <= 0) { p.state = "walk"; ringNearest(p); } return; }
     if (p.state === "flee" || p.state === "fleeAway") {
       p.timer -= dt;
@@ -52,20 +53,29 @@
       if (p.timer <= 0) { if (p.state === "fleeAway") { p.remove = true; return; } p.state = "walk"; [p.bx, p.by] = blockOfPoint(p.x, p.y); ringNearest(p); p.state = "rejoin"; }
       return;
     }
+    if (p.state === "curb") { // at the kerb: look both ways, only step out when no car is coming
+      p.timer -= dt; p.a = Math.atan2(p.ty - p.y, p.tx - p.x) + Math.sin(p.timer * 2.4) * 0.9; // head turning left and right
+      if (p.timer <= 0 && (!carComing(p) || p.timer < -7)) { p.state = "cross"; p.a = Math.atan2(p.ty - p.y, p.tx - p.x); }
+      return;
+    }
+    if (p.state === "idle") { p.timer -= dt; if (p.timer <= 0) p.state = "walk"; return; } // stopped for a moment: phone, window shopping
     if (p.state === "cross") {
       const dx = p.tx - p.x, dy = p.ty - p.y, d = Math.hypot(dx, dy);
       if (d < 6) { p.state = "walk"; p.bx = p.nbx; p.by = p.nby; ringNearest(p); return; }
-      p.x += (dx / d) * p.speed * 1.2 * dt; p.y += (dy / d) * p.speed * 1.2 * dt; p.a = Math.atan2(dy, dx); p.walk += dt * 9;
+      const hurry = carComing(p, 140) ? 2.1 : 1.2; // a car bearing down: run the rest of the way
+      p.x += (dx / d) * p.speed * hurry * dt; p.y += (dy / d) * p.speed * hurry * dt; p.a = Math.atan2(dy, dx); p.walk += dt * 9 * hurry;
       return;
     }
     const before = Math.floor(p.s / (9 * T));
-    p.s += p.dir * p.speed * dt;
+    const pace = p.speed * (1 + G.weather.rain * 0.35); // people walk faster in the rain
+    p.s += p.dir * pace * dt;
+    if (Math.random() < dt * 0.012) { p.state = "idle"; p.timer = rand(2, 6); }
     const [tx, ty, segA] = ringPos(p);
     if (p.state === "rejoin") {
       const dx = tx - p.x, dy = ty - p.y, d = Math.hypot(dx, dy);
       if (d < 8) p.state = "walk"; else { p.x += (dx / d) * p.speed * dt; p.y += (dy / d) * p.speed * dt; p.a = Math.atan2(dy, dx); p.walk += dt * 9; return; }
     }
-    p.x = tx; p.y = ty; p.a = segA + (p.dir < 0 ? Math.PI : 0); p.walk += dt * p.speed * 0.17;
+    p.x = tx; p.y = ty; p.a = segA + (p.dir < 0 ? Math.PI : 0); p.walk += dt * pace * 0.17;
     const after = Math.floor(p.s / (9 * T));
     if (before !== after && Math.random() < 0.22) { // at a corner: maybe cross the road
       const r = ringBounds(p.bx, p.by);
@@ -74,13 +84,24 @@
       const nbx = p.bx + (horiz ? cx : 0), nby = p.by + (horiz ? 0 : cy);
       if (isBlock(nbx, nby)) {
         const nr = ringBounds(nbx, nby);
-        p.state = "cross"; p.nbx = nbx; p.nby = nby;
+        p.state = "curb"; p.timer = rand(0.6, 1.6); p.nbx = nbx; p.nby = nby;
         p.tx = horiz ? (cx < 0 ? nr.x1 : nr.x0) : p.x; p.ty = horiz ? p.y : cy < 0 ? nr.y1 : nr.y0;
       }
     }
   };
+  // is a moving car going to pass through this person's crossing in the next few seconds?
+  function carComing(p, range = 420) {
+    const mx = (p.x + p.tx) / 2, my = (p.y + p.ty) / 2;
+    for (const c of G.activeCars || []) {
+      if (c.speed < 25 || Math.abs(c.x - mx) > range || Math.abs(c.y - my) > range) continue;
+      const rx = mx - c.x, ry = my - c.y, along = (rx * c.vx + ry * c.vy) / c.speed;
+      if (along < -20 || along > range) continue;
+      if (Math.abs((-rx * c.vy + ry * c.vx) / c.speed) < 90 && along / c.speed < 3.5) return c;
+    }
+    return null;
+  }
   G.scarePed = function (p, fromX, fromY, sec = 1.6) {
-    if (p.state === "down") return;
+    if (p.state === "down" || p.crew) return;
     const dx = p.x - fromX, dy = p.y - fromY, d = Math.hypot(dx, dy) || 1;
     p.state = "flee"; p.timer = sec; p.vx = (dx / d) * 170; p.vy = (dy / d) * 170; p.bubble = 1.2;
   };
@@ -96,26 +117,31 @@
   }
   G.initTrafficAI = function (car, from, to) {
     car.driver = "ai";
-    car.ai = { from, to, next: chooseNext(from, to), cruise: rand(150, 225), stuck: 0, rev: 0, honk: 0 };
+    // each driver has a personality: cruising speed, following gap (seconds), how quickly they react to a green light
+    const calm = Math.random();
+    car.ai = { from, to, next: chooseNext(from, to), cruise: rand(150, 225) * (0.9 + (1 - calm) * 0.2), gap: 0.45 + calm * 0.5, react: 0.25 + calm * 0.9, go: 0, stuck: 0, rev: 0, honk: 0 };
   };
   function obstacleAhead(car, range) {
     const fx = Math.cos(car.a), fy = Math.sin(car.a);
-    const check = (ox, oy) => {
+    let best = null, bd = Infinity;
+    const check = (o, ox, oy) => {
       const rx = ox - car.x, ry = oy - car.y, f = rx * fx + ry * fy;
-      if (f <= 0 || f > range) return false;
-      return Math.abs(-rx * fy + ry * fx) < 24;
+      if (f <= 0 || f > range || f >= bd) return;
+      if (Math.abs(-rx * fy + ry * fx) < 24) { best = o; bd = f; }
     };
-    for (const o of G.activeCars) if (o !== car && check(o.x, o.y)) return o;
-    if (!P.car && !P.ride && check(P.x, P.y)) return P;
-    for (const p of G.peds) if ((p.state === "cross" || p.state === "flee") && check(p.x, p.y)) return p;
-    return null;
+    for (const o of G.activeCars) if (o !== car) check(o, o.x, o.y);
+    if (!P.car && !P.ride) check(P, P.x, P.y);
+    for (const p of G.peds) if (p.state === "cross" || p.state === "flee" || p.state === "down" || p.crew) check(p, p.x, p.y); // incl. people hurt in the road and emergency crews: traffic queues at an accident
+    obstacleAhead.d = bd;
+    return best;
   }
   G.trafficAI = function (car, dt, depth = 0) {
     const ai = car.ai, c = car.ctrl;
     if (car.wrecked) return;
     if (ai.rev > 0) { ai.rev -= dt; c.t = -1; c.s = ai.revSteer; c.hb = false; return; }
     const from = W.nodes[ai.from], to = W.nodes[ai.to];
-    const dx = Math.sign(to.x - from.x), dy = Math.sign(to.y - from.y), rx = -dy, ry = dx, lane = 34;
+    ai.yield = G.ems ? G.ems.yieldFor(car, ai.yield || 0, dt) : 0;
+    const dx = Math.sign(to.x - from.x), dy = Math.sign(to.y - from.y), rx = -dy, ry = dx, lane = 34 + ai.yield * 16;
     const along = (car.x - from.x) * dx + (car.y - from.y) * dy, segLen = Math.abs(to.x - from.x) + Math.abs(to.y - from.y);
     const remaining = segLen - along;
     if (remaining < 62 && depth < 3) { ai.from = ai.to; ai.to = ai.next; ai.next = chooseNext(ai.from, ai.to); return G.trafficAI(car, dt, depth + 1); }
@@ -127,21 +153,36 @@
     c.s = clamp(angDiff(car.a, Math.atan2(ay - car.y, ax - car.x)) * 2.4, -1, 1);
     const nx = W.nodes[ai.next];
     const turning = !(Math.sign(nx.x - to.x) === dx && Math.sign(nx.y - to.y) === dy);
+    // indicate ~4 s before the turn (sign of the cross product = which side), and while pulled over for a siren
+    const tdx = Math.sign(nx.x - to.x), tdy = Math.sign(nx.y - to.y);
+    car.blink = ai.yield > 0.3 ? 1 : turning && remaining < 340 ? (dx * tdy - dy * tdx > 0 ? 1 : -1) : 0;
     let want = ai.cruise;
-    if (turning && remaining < 190) want = 105;
+    if (turning) want = Math.min(want, 95 + Math.max(0, remaining - 120) * 0.55); // slow down progressively for the corner
+    if (ai.yield > 0.3) want = Math.min(want, 40); // pulled over for an emergency vehicle
     // traffic lights: brake smoothly to the stop line on red (or on amber when there's room to stop); never stop inside the junction
     if (to.sig && remaining < 260 && remaining > T + 30) { // only before the stop line: once past it, clear the junction
       const st = W.signalState(to, dx !== 0, G.time), stopAt = remaining - (T + 34);
-      if (st === "r" || (st === "y" && stopAt > 45)) want = Math.min(want, Math.max(0, stopAt * 1.7));
+      const stop = st === "r" || (st === "y" && stopAt > 45);
+      if (stop) want = Math.min(want, Math.max(0, stopAt * 1.7));
       ai.atLight = want === 0;
-    } else ai.atLight = false;
-    const ob = obstacleAhead(car, 46 + car.speed * 0.5);
-    if (ob) { want = 0; if (ob === P || ob === P.car) ai.honk += dt; }
-    else ai.honk = 0;
+      // when the light changes, drivers take a moment to notice and pull away
+      if (stop) ai.go = ai.react; else if (ai.go > 0 && car.speed < 10) { ai.go -= dt; want = 0; ai.atLight = true; }
+    } else { ai.atLight = false; ai.go = 0; }
+    const ob = obstacleAhead(car, 46 + car.speed * (0.5 + ai.gap));
+    if (ob) {
+      // follow the car in front at this driver's time gap, matching its speed instead of slamming to a stop
+      const od = obstacleAhead.d, ov = ob.vx !== undefined && ob !== P ? Math.max(0, (ob.vx * Math.cos(car.a) + ob.vy * Math.sin(car.a))) : 0;
+      const safe = 40 + car.speed * ai.gap;
+      want = Math.min(want, Math.max(0, ov + (od - safe) * 1.4));
+      if (od < 44) want = 0;
+      if (ob === P || ob === P.car) ai.honk += dt;
+    } else ai.honk = 0;
     if (ai.honk > 1.6) { ai.honk = -3; G.events.push({ type: "honk", x: car.x, y: car.y }); }
     const v = car.vF;
-    c.t = v < want - 12 ? 1 : v > want + 20 ? -0.7 : 0.12;
-    if (want === 0) c.t = v > 8 ? -1 : 0;
+    // smooth pedal work: throttle and brake in proportion to the speed error
+    const err = want - v;
+    c.t = err > 0 ? clamp(err / 45, 0.08, 1) : err < -14 ? clamp(err / 60, -1, -0.15) : 0.08;
+    if (want === 0) c.t = v > 8 ? clamp(-v / 60, -1, -0.35) : 0;
     c.hb = false;
     if (want > 40 && car.speed < 6 && !ai.atLight) { ai.stuck += dt; if (ai.stuck > 2.4) { ai.stuck = 0; ai.rev = 1.1; ai.revSteer = -c.s || 1; } } else ai.stuck = 0;
   };
@@ -293,15 +334,16 @@
 
   // ---------------- player ----------------
   G.enterNearestCar = function () {
-    if ((P.z || 0) > 8 || P.mode !== "ground") return false;
-    let best = null, bd = 64;
-    for (const c of G.cars) { const d = dist(c.x, c.y, P.x, P.y); if (d < bd && !c.wrecked && c.driver !== "racer") { best = c; bd = d; } }
+    if (P.mode !== "ground") return false;
+    let best = null, bd = 90;
+    for (const c of G.cars) { const d = dist(c.x, c.y, P.x, P.y), reach = c.s.air || c.s.boat ? 85 : 64; if (d < reach && d < bd && !c.wrecked && c.driver !== "racer" && Math.abs((P.z || 0) - c.z) < 14) { best = c; bd = d; } }
     if (!best) return false;
     if (best.driver === "ai") {
       const p = makePed(0, 0, 0); p.x = best.x - Math.sin(best.a) * 26; p.y = best.y + Math.cos(best.a) * 26;
       G.peds.push(p); G.scarePed(p, P.x, P.y, 3); p.state = "fleeAway"; p.bubble = 2;
       G.crime(1, "Carjacking", 2); G.audio.sfx("door");
     } else if (best.driver === "police") { G.crime(2, "Stole a police car"); }
+    else if (best.driver === "ems") { G.crime(2, `Stole the ${best.s.name}`); G.ems && G.ems.stolen(best); }
     else G.audio.sfx("door");
     best.driver = "player"; best.siren = false; best.ai = null; best.keep = true; best.copLeaving = false;
     best.manual = !!G.settings.manual && !best.s.pedal; best.gear = 1; best.shiftT = 0;
@@ -310,11 +352,18 @@
     return true;
   };
   G.exitCar = function () {
-    const c = P.car; if (!c || c.speed > 90) return;
+    const c = P.car; if (!c || (c.speed > 90 && !c.s.air)) return;
     const lx = -Math.sin(c.a), ly = Math.cos(c.a);
     let x = c.x - lx * 30, y = c.y - ly * 30;
     if (W.pointBlocked(x, y, 8)) { x = c.x + lx * 30; y = c.y + ly * 30; }
-    P.x = x; P.y = y; c.driver = null; c.ctrl = { t: 0, s: 0, hb: true, boost: false }; c.manual = false; P.car = null; G.heroes.reset(); P.vx = P.vy = 0;
+    if (c.s.boat) { // step ashore: nearest dry, open spot
+      let spot = null;
+      for (let r = 26; r <= 130 && !spot; r += 12) for (let k = 0; k < 16; k++) { const a = (k / 16) * TAU, px = c.x + Math.cos(a) * r, py = c.y + Math.sin(a) * r; if (!W.waterAt(px, py) && !W.pointBlocked(px, py, 8)) { spot = [px, py]; break; } }
+      if (!spot) { G.ui.toast("Steer closer to the shore to get out", "#4cc9f0"); return; }
+      [x, y] = spot;
+    }
+    if (c.s.air) { P.z = c.z; P.vz = 0; if (c.z > W.groundAt(c.x, c.y)[0] + 30) G.ui.toast("Bailing out!", "#ffd60a"); }
+    P.x = x; P.y = y; c.driver = null; c.ctrl = { t: 0, s: 0, hb: true, boost: false, lift: 0 }; c.manual = false; c.sim = false; P.car = null; G.heroes.reset(); P.vx = P.vy = 0;
     G.audio.sfx("door"); G.events.push({ type: "exitCar", car: c });
   };
   G.updatePlayer = function (dt) {
@@ -326,6 +375,15 @@
       k.t = Input.down("KeyW", "ArrowUp") ? 1 : Input.down("KeyS", "ArrowDown") ? -1 : 0;
       k.s = (Input.down("KeyD", "ArrowRight") ? 1 : 0) - (Input.down("KeyA", "ArrowLeft") ? 1 : 0);
       k.hb = Input.down("Space");
+      const T2 = G.touch; // phone tilt steering (gyroscope), analog
+      if (T2 && T2.gyro && T2.tilt !== null && !Input.down("KeyA", "ArrowLeft", "KeyD", "ArrowRight")) k.s = T2.tilt;
+      c.sim = G.settings.handling !== "arcade" && !c.s.bike && !c.s.boat && !c.s.air;
+      if (c.s.air) { // helicopter: W/S pitch forward/back, A/D yaw, Space climb, Shift descend
+        k.lift = Input.down("Space") ? 1 : Input.down("ShiftLeft", "ShiftRight") ? -1 : 0; k.hb = false; k.boost = false;
+        if (T2 && T2.gyro && T2.pitch !== null && !Input.down("KeyW", "ArrowUp", "KeyS", "ArrowDown")) k.t = T2.pitch;
+        P.x = c.x; P.y = c.y; P.a = c.a; P.z = c.z;
+        return;
+      }
       k.boost = Input.down("ShiftLeft", "ShiftRight") && P.nitro > 0.02 && k.t > 0 && !c.s.pedal;
       c.manual = !!G.settings.manual && !c.s.pedal;
       if (c.manual) {
