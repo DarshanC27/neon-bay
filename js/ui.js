@@ -154,7 +154,10 @@
     for (let v = 0; v <= max; v += 80) { const a = a0 + (a1 - a0) * (v / max); spc.fillText(v, R + Math.cos(a) * (R - 36), R + Math.sin(a) * (R - 36)); }
     spc.fillStyle = "#fff"; spc.font = "bold 44px Bahnschrift"; spc.fillText(kmh, R, R - 4);
     spc.font = "12px Bahnschrift"; spc.fillStyle = "#aab"; spc.fillText("KM/H", R, R + 24);
-    if (c.manual) { // rev counter ring + shift light + big gear letter
+    if (c.s.air) { // helicopter: altitude above the ground instead of a gear
+      const alt = Math.max(0, Math.round((c.z - W.groundAt(c.x, c.y)[0]) / 6));
+      spc.font = "bold 18px Bahnschrift"; spc.fillStyle = "#22d3ee"; spc.fillText(`ALT ${alt} m`, R, R + 48);
+    } else if (c.manual) { // rev counter ring + shift light + big gear letter
       const r01 = clamp((c.rpm - 900) / 6300, 0, 1), b0 = Math.PI * 0.8, b1 = Math.PI * 2.2;
       spc.lineWidth = 5; spc.strokeStyle = "rgba(255,255,255,0.1)"; spc.beginPath(); spc.arc(R, R, R - 30, b0, b1); spc.stroke();
       spc.strokeStyle = r01 > 0.86 ? "#ff3048" : r01 > 0.7 ? "#ffd60a" : "#19f5a0"; spc.beginPath(); spc.arc(R, R, R - 30, b0, b0 + (b1 - b0) * r01); spc.stroke();
@@ -286,9 +289,11 @@
     const owned = Object.keys(G.state.owned).filter((k) => G.state.owned[k]);
     phoneMenu("My Garage", owned.length ? owned.map((t) => ({ label: `${G.CAR_TYPES[t].name}`, right: "deliver $100", act: () => deliverCar(t) })) : [{ label: "No cars yet. Buy one at Turbo Motors", disabled: true }]);
   }
+  // boats are delivered to the nearest marina, a little along the jetty
+  const boatSpot = () => { const mr = Object.values(W.marinas).sort((a, b) => dist(a.x, a.y, P.x, P.y) - dist(b.x, b.y, P.x, P.y))[0]; return { x: mr.x + (mr.a === 0 ? 140 : 0), y: mr.y + (mr.a === 0 ? 0 : 140), a: mr.a }; };
   function deliverCar(type) {
     if (G.state.money < 100) return U.toast("Not enough money", "#ff4d6d");
-    const lp = W.randomLanePoint(P.x, P.y, 120, 420); if (!lp) return U.toast("No road nearby", "#ff4d6d");
+    const lp = type === "boat" ? boatSpot() : W.randomLanePoint(P.x, P.y, 120, 420); if (!lp) return U.toast("No road nearby", "#ff4d6d");
     G.addMoney(-100); const c = new G.Car(type, lp.x, lp.y, lp.a, G.state.colors[type]); c.keep = true; G.cars.push(c);
     G.state.waypoint = { x: lp.x, y: lp.y }; routeT = 0; U.toast(`Your ${c.s.name} has been delivered nearby`, "#22d3ee"); U.togglePhone(false);
   }
@@ -312,6 +317,7 @@
       { label: "Character voices (TTS)", right: S.voices ? "ON" : "OFF", act: () => { S.voices = !S.voices; refresh(); } },
       { label: "Gearbox", right: S.manual ? "MANUAL" : "AUTOMATIC", act: () => { S.manual = !S.manual; if (P.car) { P.car.gear = 1; P.car.shiftT = 0; } refresh(); } },
       { label: "Graphics: bloom + film look", right: S.post === false ? "OFF" : "ON", act: () => { G.render.setPost(S.post === false); refresh(); } },
+      { label: "Car handling", right: S.handling === "arcade" ? "ARCADE" : "REALISTIC", act: () => { S.handling = S.handling === "arcade" ? "realistic" : "arcade"; refresh(); } },
     ];
     const refresh = () => { const sel = menu ? menu.sel : 0; phoneMenu("Settings", items()); menu.sel = sel; renderMenu(); };
     phoneMenu("Settings", items());
@@ -337,7 +343,7 @@
         const copsNear = G.cars.some((c) => c.driver === "police" && dist(c.x, c.y, P.x, P.y) < 380);
         const cols = [["Neon pink", "#ff3df2"], ["Electric cyan", "#22d3ee"], ["Sunset orange", "#ff7b00"], ["Toxic green", "#7cff4f"], ["Midnight black", "#111111"], ["Pearl white", "#f1faee"], ["Royal purple", "#7b2cbf"], ["Gold", "#d4af37"]];
         items = cols.map(([n, c]) => ({ label: `<span style="color:${c}">■</span> Respray: ${n}`, right: "$250", disabled: copsNear, act: buy(250, () => {
-          P.car.color = c; P.car.hp = P.car.s.hp; P.car.dents = []; G.state.colors[P.car.type] = c;
+          P.car.color = c; P.car.hp = P.car.s.hp; P.car.dents = []; P.car.crush = null; G.state.colors[P.car.type] = c;
           if (G.wanted.stars) { G.clearWanted(); U.toast("New paint. The cops lost track of you", "#19f5a0"); }
           U.banner("FRESH PAINT", "Repaired and resprayed", c); close();
         }) }));
@@ -345,10 +351,11 @@
       }
     } else if (id === "dealer") {
       title = "🚗 TURBO MOTORS";
-      items = ["bicycle", "compact", "hatch", "sedan", "sportbike", "van", "pickup", "suv", "muscle", "sports", "super"].map((t) => {
+      items = ["bicycle", "compact", "hatch", "sedan", "sportbike", "van", "pickup", "suv", "muscle", "boat", "sports", "super", "heli"].map((t) => {
         const c = G.CAR_TYPES[t], own = S.owned[t];
         return { label: `${c.name}  <small>${Math.round(c.max * 0.6)} km/h · grip ${c.grip}</small>`, right: own ? "OWNED" : fmtMoney(c.price), disabled: own, act: buy(c.price, () => {
-          S.owned[t] = true; const lp = W.randomLanePoint(P.x, P.y, 80, 380); const car = new G.Car(t, lp.x, lp.y, lp.a); car.keep = true; G.cars.push(car);
+          S.owned[t] = true; const lp = t === "boat" ? boatSpot() : W.randomLanePoint(P.x, P.y, 80, 380);
+          const car = new G.Car(t, lp.x, lp.y, lp.a); car.keep = true; G.cars.push(car);
           S.colors[t] = car.color; U.banner("NEW RIDE", `${c.name} is parked outside. It's also in your garage.`, "#22d3ee"); G.save(); close();
         }) };
       });

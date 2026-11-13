@@ -65,6 +65,20 @@ mainland cities sit on the same road grid and are joined by highways:
 - **Two people, one car (online):** walk up to a friend's car or motorbike and press **F** to ride as their passenger. You sit in the passenger seat or on the pillion, the camera follows the car, and voice chat keeps working. Press **F** again to get out.
 - **Realistic cars:** a seated driver behind see-through glass, with seats, a dashboard and a steering wheel. Glasshouses taper inwards towards the roof, and the cars have alloy wheels, door mirrors, grilles and number plates. The SUV has roof rails and the pickup has an open bed.
 
+## 🚁 Sky, sea and city jobs
+- **Helicopters (Skylark H1):** spin up the rotor, `Space` climbs, `Shift` descends, `W`/`S` pitch forward/back, `A`/`D` yaw. Land on rooftops. Helipads at the Neon Bay beach, Highgate park and Sierra Vista, plus one on the police roof. The speedo shows your altitude.
+- **Boats (Wave Runner 24):** they plane on the water with a bow wave and a wake, bob on the swell and stay off the land. Marinas at Neon Bay and Port Calder. Step ashore with `F` next to the shore.
+- **City jobs:** Sky Courier (Highgate: land on three skyscraper roofs), Smuggler's Run (Port Calder: speedboat round the coast), Casino Getaway (Sierra Vista: start with 3 stars) and the **Grand Tour** race through all four cities.
+- **The Highgate Vault (co-op heist, works solo too):** one player cracks the vault while the other waits in the getaway car, then you lose the cops together and meet at the desert hideout. $25,000 each when you finish as a crew.
+- **Cameras and handling:** `C` in a vehicle cycles chase / far chase / **cockpit view**. Phone → Settings → Car handling switches between the **realistic** tyre model (slip angles, weight transfer) and arcade grip. On phones, **TILT** steers and flies by tilting the phone.
+
+## 🚑 Emergency services
+- **Crashes get a response:** wrecks in the cities are reported. A **fire engine** comes for a burning wreck, and the firefighters hose it down (water jets, steam). A **tow truck** then hooks the wreck up and hauls it away, so the street really clears.
+- **Paramedics:** a pedestrian knocked down hard stays hurt on the ground. An **ambulance** (from the hospital when it's close) arrives, and the crew kneel and give CPR until they're back on their feet.
+- **Traffic pulls over:** cars move to the kerb and slow down for any siren coming up behind them, and queue at an accident scene instead of driving through it.
+- **First aid:** reach someone hurt before the ambulance does and press `E` to help them up (+$150).
+- At the scene the sirens stop but the lights keep flashing. Stealing an emergency vehicle is a 2-star crime.
+
 ## 🎞️ Graphics: film look, people, traffic lights
 - **Post-processing:**
   - The scene renders in HDR (half-float, 4× MSAA), then gets a 3-level bloom, ACES filmic tone mapping, colour grading (tinted shadows, warm highlights), a vignette and fine film grain.
@@ -80,6 +94,24 @@ mainland cities sit on the same road grid and are joined by highways:
 - **Shaped cars:** bodies have a sloped hood, raked windshield, tapered cabin and rounded edges instead of boxes, plus a soft contact shadow under every car. Geometry is shared per car type, so it costs no frame rate.
 - **Moving clouds** whose colour follows sunrise, sunset, night and storms.
 - **Engine sound with a real gearbox:** six gears scaled to each car's top speed, 900 to 7,200 rpm, a dip on every gear change, a bouncing rev limiter and flare under wheelspin. In multiplayer, other players' engines are heard in 3D from where their cars are.
+
+### Realism pass 2
+- **Driving physics (Realistic handling):**
+  - Real acceleration curves: a saloon does 0–100 km/h in about 4 s and a supercar in about 2.6 s. Top speeds are unchanged.
+  - Grip limits launch and braking. Too much throttle spins the wheels, with smoke and marks. Brakes stop a car from 100 km/h in about 35 m, and further in the rain.
+  - Cornering grip, rolling resistance and aero drag are at real levels.
+  - Bodies roll out of a corner and dip their nose under braking.
+- **Crash damage:** impacts crumple the front, rear or sides of the body where you were hit. Lamps break, the windscreen cracks, and wrecks put their hazard lights on.
+- **Traffic:**
+  - Cars indicate before turning and while pulling over for sirens.
+  - Every driver has their own cruising speed and following distance. They follow the car ahead smoothly, ease on and off the pedals, and take a moment to pull away when the light turns green.
+- **Pedestrians:** they stop at the kerb and look both ways before crossing, and run if a car comes. Some stop for a moment on the pavement, and everyone walks faster in the rain.
+- **Sound:**
+  - The engine has harmonics, combustion noise and load-dependent grit, and it pops on the overrun.
+  - Tyre roar gets louder on dirt, and you hear wind at speed, rain, and tyre hiss on wet roads.
+  - Sirens wail (police) or yelp (ambulance and fire) with Doppler and stereo pan. Cars passing you are heard with Doppler too.
+  - Streets echo between tall buildings. There's a city hum, birds by day and crickets at night.
+- **City:** worn roads with patch repairs, cracks, manholes, polished wheel tracks and oil drips at the lights. Building bases are darker where they meet the ground, facades have rain streaks, and tree crowns are fuller and rounder.
 
 ## 🎯 Campaign: 100 missions
 Press **P → 🎯 Missions** to see every chapter. The next mission is always marked on your map with its contact's face; walk or drive into the marker and press **E**. Completed missions can be replayed straight from the phone.

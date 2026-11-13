@@ -70,7 +70,7 @@
   const TOP = [
     ["tMap", "🗺️", "MAP", "KeyM"], ["tPhone", "📱", "PHONE", "KeyP"], ["tEmpire", "🏢", "EMPIRE", "A_empire"],
     ["tCrimson", "🕷️", "SUIT X", "A_crimson"], ["tAgent", "🎯", "AGENTS", "A_agent"], ["tSuit", "🔄", "SUITS", "KeyC"],
-    ["tRadio", "📻", "RADIO", "KeyQ"], ["tPause", "⏸", "MENU", "Escape"],
+    ["tRadio", "📻", "RADIO", "KeyQ"], ["tGyro", "📐", "TILT", "A_gyro"], ["tPause", "⏸", "MENU", "Escape"],
   ];
   let html = `<div class="zone" id="tMove"></div><div class="zone" id="tLook"></div><div id="tStick"><div id="tKnob"></div></div>`;
   for (const [id, ic, lb, , sz, r, b] of BTNS) html += `<div class="tb ${sz}" id="${id}" style="right:calc(${r}px + ${R});bottom:calc(${b}px + ${B})"><i>${ic}</i>${lb}</div>`;
@@ -169,6 +169,8 @@
     $("bJump").innerHTML = inCar ? "<i>🛑</i>BRAKE" : G.heroes && G.heroes.LIST && G.heroes.LIST[P.hero] && G.heroes.LIST[P.hero].swing ? "<i>🕸️</i>SWING" : "<i>⤒</i>JUMP";
     $("bSprint").innerHTML = inCar ? "<i>🔥</i>NITRO" : "<i>⚡</i>RUN";
     $("bPunch").classList.toggle("hide", inCar); $("bSpecial").classList.toggle("hide", inCar);
+    if (inCar && P.car.s.air) { $("bJump").innerHTML = "<i>⬆</i>UP"; $("bSprint").innerHTML = "<i>⬇</i>DOWN"; }
+    $("tGyro").classList.toggle("down", !!T.gyro);
     const man = inCar && P.car.manual; $("bGearUp").classList.toggle("hide", !man); $("bGearDn").classList.toggle("hide", !man);
     const pr = document.getElementById("prompt"); $("bUse").classList.toggle("hot", !!(pr && pr.textContent.trim() && getComputedStyle(pr).opacity !== "0"));
     const ab = document.getElementById("abilityBar"), agent = !!(ab && ab.classList.contains("on")) && !inCar;
@@ -176,4 +178,41 @@
   }
   requestAnimationFrame(frame);
   T.reset = resetAll;
+
+  // ---------- gyroscope: tilt to steer / fly, turn the phone to look around ----------
+  // Off by default. The TILT button turns it on (iPhone asks for permission on that tap) and re-centres:
+  // however you're holding the phone at that moment becomes "straight ahead".
+  T.gyro = false; T.tilt = null; T.pitch = null;
+  let base = null, lastAlpha = null;
+  const DEAD = 3, FULL = 24; // degrees: dead zone, full lock
+  const curve = (deg) => { const a = Math.abs(deg); if (a < DEAD) return 0; return Math.sign(deg) * clamp((a - DEAD) / (FULL - DEAD), 0, 1) ** 1.25; };
+  T.applyOrientation = function (beta, gamma, alpha) {
+    // landscape: rolling the phone like a steering wheel changes beta, tipping it towards you changes gamma
+    const ang = (screen.orientation && screen.orientation.angle) || window.orientation || 90;
+    const sign = ang === -90 || ang === 270 ? -1 : 1;
+    const roll = beta * sign, tip = -gamma * sign;
+    if (!base) base = { roll, tip };
+    T.tilt = curve(roll - base.roll);
+    T.pitch = curve((tip - base.tip) * 0.8);
+    // gyro look on foot: turning your body with the phone turns the camera
+    if (alpha !== null && alpha !== undefined) {
+      if (lastAlpha !== null && G.cam3 && !G.player.car && G.state.mode === "play") { let d = alpha - lastAlpha; d -= Math.round(d / 360) * 360; if (Math.abs(d) < 20 && Math.abs(d) > 0.4) { G.cam3.yaw -= (d * Math.PI) / 180; G.cam3.lastMouse = G.time; } }
+      lastAlpha = alpha;
+    }
+  };
+  const onOri = (e) => { if (T.gyro && e.beta !== null) T.applyOrientation(e.beta, e.gamma, e.alpha); };
+  T.setGyro = async function (on) {
+    if (on && typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+      try { if ((await DeviceOrientationEvent.requestPermission()) !== "granted") { G.ui.toast("Motion access was denied (Settings → Safari → Motion & Orientation)", "#ff4d6d"); return; } } catch (err) { G.ui.toast("Tap TILT again to allow motion access", "#ffa028"); return; }
+    }
+    T.gyro = on; base = null; lastAlpha = null; T.tilt = T.pitch = null;
+    if (on) addEventListener("deviceorientation", onOri); else removeEventListener("deviceorientation", onOri);
+    G.ui.toast(on ? "Tilt controls ON: tilt to steer / fly, turn to look. Tap TILT again to re-centre, long-press to turn off" : "Tilt controls off", "#22d3ee");
+  };
+  const gb = $("tGyro"); let pressT = 0;
+  gb.addEventListener("pointerdown", () => { pressT = performance.now(); });
+  gb.addEventListener("pointerup", () => {
+    const long = performance.now() - pressT > 600;
+    if (T.gyro && !long) { base = null; G.ui.toast("Tilt re-centred", "#22d3ee"); } else T.setGyro(!T.gyro); // off: tap turns on, on: long-press turns off
+  });
 })();

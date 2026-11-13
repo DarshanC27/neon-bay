@@ -35,6 +35,12 @@
     return W.tiles[ty * N + tx];
   };
   W.isRoad = (x, y) => W.tileAt(x, y) === TT.ROAD;
+  // open water for boats: sea tiles, plus the water under bridges
+  W.waterAt = (x, y) => {
+    if (W.tileAt(x, y) === TT.WATER) return x > -400 && y > -400 && x < W.SIZE + 400 && y < W.SIZE + 400;
+    for (const b of W.bridges || []) { const c = (LAT(b.k) + 1) * T, u = (b.h ? x : y) / T, w = b.h ? y : x; if (u >= b.u0 && u <= b.u1 + 1 && Math.abs(w - c) < T + 2) return true; }
+    return false;
+  };
 
   // ----- districts (7x7 blocks) -----
   const DIST = (W.dist = []);
@@ -482,6 +488,22 @@
     pts.push({ x: tx, y: ty });
     return pts;
   };
+  // a right-hand lane point between minD and maxD from (x, y), searching the nearby road edges (reliable at short range,
+  // unlike randomLanePoint which samples the whole neighbourhood). Picks randomly among the matches.
+  W.lanePointNear = (x, y, minD, maxD) => {
+    const out = [], R = maxD + 900;
+    for (const n of nodes) {
+      if (Math.abs(n.x - x) > R || Math.abs(n.y - y) > R) continue;
+      for (const nbId of n.nb) {
+        const m = nodes[nbId], dx = Math.sign(m.x - n.x), dy = Math.sign(m.y - n.y);
+        for (let t = 0.15; t < 0.9; t += 0.1) {
+          const px = lerp(n.x, m.x, t) - dy * 34, py = lerp(n.y, m.y, t) + dx * 34, d = dist(px, py, x, y);
+          if (d >= minD && d <= maxD) out.push({ x: px, y: py, from: n.id, to: nbId, a: Math.atan2(dy, dx) });
+        }
+      }
+    }
+    return out.length ? out[Math.floor(Math.random() * out.length)] : null;
+  };
   W.randomLanePoint = (nearX, nearY, minD, maxD) => {
     const pool = nodes.filter((n) => Math.abs(n.x - nearX) < maxD + 1600 && Math.abs(n.y - nearY) < maxD + 1600);
     if (!pool.length) return null;
@@ -497,6 +519,24 @@
     return null;
   };
 
+  // ----- places used by jobs: the bank (Highgate), a casino (Sierra Vista), a desert hideout, helipads and marinas -----
+  {
+    const inDist = (b, d) => W.districtAt(b.x + b.w / 2, b.y + b.h / 2) === d;
+    const hgC = W.CITIES[1], svC = W.CITIES[3];
+    const bank = buildings.filter((b) => inDist(b, "hg_core") && !b.spire && b.w < 300).sort((a, b) => dist(a.x, a.y, hgC.cx, hgC.cy) - dist(b.x, b.y, hgC.cx, hgC.cy))[0];
+    if (bank) { bank.sign = "BANK OF HIGHGATE"; bank.neon = "#ffd60a"; bank.poi = "bank"; }
+    const casino = buildings.find((b) => b.sign === "GOLDEN MIRAGE") || buildings.find((b) => inDist(b, "sv_strip"));
+    const ranch = buildings.filter((b) => inDist(b, "sv_ranch")).sort((a, b) => dist(b.x, b.y, svC.cx, svC.cy) - dist(a.x, a.y, svC.cx, svC.cy))[0];
+    // a walkable spot on the pavement just outside a building
+    const doorOf = (b) => { for (const [x, y] of [[b.x + b.w / 2, b.y + b.h + 30], [b.x + b.w / 2, b.y - 30], [b.x - 30, b.y + b.h / 2], [b.x + b.w + 30, b.y + b.h / 2]]) if (!W.pointBlocked(x, y, 8)) return { x, y }; return { x: b.x + b.w / 2, y: b.y + b.h + 30 }; };
+    W.places = { bank: bank && Object.assign(doorOf(bank), { b: bank }), casino: casino && Object.assign(doorOf(casino), { b: casino }), hideout: ranch && Object.assign(doorOf(ranch), { b: ranch }) };
+    const hgPark = (() => { for (let by = hgC.by0; by <= hgC.by1; by++) for (let bx = hgC.bx0; bx <= hgC.bx1; bx++) if (W.blockAt(bx, by) === "hg_park") return [bx, by]; return [hgC.bx0, hgC.by0]; })();
+    const openSpot = (x0, y0, r) => { for (let k = 0; k < 60; k++) { const a = k * 2.4, d = (k / 60) * r, x = x0 + Math.cos(a) * d, y = y0 + Math.sin(a) * d; if (!W.pointBlocked(x, y, 40) && W.tileAt(x, y) !== TT.WATER && !W.decor.some((p) => p.type === "pond" && ((x - p.x) / (p.rx + 45)) ** 2 + ((y - p.y) / (p.ry + 45)) ** 2 < 1)) return { x, y }; } return { x: x0, y: y0 }; };
+    W.helipads = { bay: { x: 92.3 * T, y: 22 * T, a: -Math.PI / 2 }, // faces away from the Ferris wheel just north of it
+                   highgate: Object.assign(openSpot((LAT(hgPark[0]) + 7) * T, (LAT(hgPark[1]) + 7) * T, 300), { a: 0 }), vista: Object.assign(openSpot(svC.x1 + 160, svC.cy, 200), { a: Math.PI }) };
+    W.marinas = { bay: { x: 94.6 * T, y: 28 * T, a: -Math.PI / 2 }, calder: { x: 30 * T, y: 210.7 * T, a: 0 } };
+    W.places.getaway = W.places.bank && (() => { const n = W.nearestNode(W.places.bank.x, W.places.bank.y); return { x: n.x + T + 40, y: n.y + 34 }; })();
+  }
   // ----- streetlights, ramps, tokens, race routes -----
   W.lights = [];
   nodes.forEach((n) => { if (!n.hwy) [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sy]) => W.lights.push({ x: n.x + sx * (T + 24), y: n.y + sy * (T + 24) })); });
@@ -526,6 +566,8 @@
     { name: "Downtown Dash", reward: 3000, nodes: [18, 21, 37, 34, 18], color: "#ff3df2" },
     { name: "Coastal Run", reward: 4500, nodes: [7, 63, 56, 0, 7], color: "#ffd60a" },
   ];
+  // the Grand Tour: a long race through all four cities over every highway
+  W.raceRoutes.push({ name: "Grand Tour", reward: 12000, nodes: [W.node(5, 3).id, W.node(13, 3).id, W.node(13, 13).id, W.node(3, 13).id, W.node(3, 5).id], color: "#19f5a0", long: true });
   W.raceRoutes.forEach((r) => {
     r.path = [];
     for (let k = 0; k < r.nodes.length - 1; k++) { const p = W.nodePath(r.nodes[k], r.nodes[k + 1]); if (k > 0) p.shift(); r.path.push(...p); }
