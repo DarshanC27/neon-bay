@@ -65,7 +65,7 @@
   // a bouncing rev limiter, and a bit of wheelspin flare when the tyres are sliding. Used for my car and other players'.
   const RATIOS = [0, 0.16, 0.31, 0.47, 0.63, 0.8, 1.02];
   A.engineNote = function (c, dt) {
-    if (c.manual && c.rpm) { // the real gearbox drives the sound
+    if ((c.manual || c.autoBox) && c.rpm) { // the real gearbox (manual, or the automatic of the realistic handling) drives the sound
       const sh = c.shiftT > 0 ? c.shiftT : 0, bounce = c.limiter > 0 ? Math.abs(Math.sin(G.time * 40)) * 300 : 0, rpm = c.rpm - bounce;
       return { f: (rpm / 60) * 2 * 0.8, rpm01: (rpm - 900) / 6300, load: clamp(Math.abs(c.ctrl.t || 0), 0, 1), shift: sh, gear: c.gear };
     }

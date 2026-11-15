@@ -186,6 +186,44 @@ with sync_playwright() as p:
     for _ in range(24):
         seen.update(js("G.peds.map(p => p.state)")); time.sleep(0.5)
     check("pedestrians stop at the kerb or pause", "curb" in seen or "idle" in seen, ",".join(sorted(seen)))
+    # ---- realism pass 3: rendering
+    check("static scenery is merged into batches", js("G.render.bakedStatics()") > 100, js("G.render.bakedStatics()"))
+    check("street furniture placed on the pavements", js("G.world.props.length") > 400 and js("G.render.propCount()") == js("G.world.props.length"), f"{js('G.world.props.length')} clusters")
+    check("street furniture never blocks the pavement", js("G.world.props.every(q => G.world.tileAt(q.x, q.y) === G.world.TT.WALK && !G.world.pointBlocked(q.x, q.y, 4))"))
+    check("mid-block street lamps added", js("G.world.lights.filter(l => l.mid).length") > 150, js("G.world.lights.filter(l => l.mid).length"))
+    check("sun shadows use a tight box around the camera", js("G.render.shadowBox()") <= 400, js("G.render.shadowBox()"))
+    js("G.render.setQuality(0)"); q0 = js("G.render.quality()")
+    js("G.render.setQuality(3)"); time.sleep(0.4); q3 = js("G.render.quality()")
+    check("quality levels trade resolution and shadows for speed", q3["pixelRatio"] < q0["pixelRatio"] and q3["shadowMap"] < q0["shadowMap"] and q3["shadowEvery"] > q0["shadowEvery"], f"{q0} -> {q3}")
+    js("G.render.setQuality('auto')"); check("adaptive quality can be switched back to auto", js("G.render.quality().auto === true && G.settings.autoQuality === true"))
+    js("G.debug.rain(1)"); time.sleep(4.5)
+    check("rain soaks the road and fills the puddles", js("G.render.wetness()") > 0.8 and js("G.render.wetUniform.value") > 0.8, f"wet {js('G.render.wetness()'):.2f}")
+    js("G.debug.rain(0)")
+    car_parts = js("(() => { const c = G.cars.find(c => !c.s.bike && !c.s.air && !c.s.boat && G.render.debugCar(c)); return c ? G.render.carMeshCount(c) : -1; })()")
+    check("a car is drawn with a handful of merged meshes", 0 < car_parts <= 22, f"{car_parts} meshes")
+    js("""(() => { const P = G.player, t = G.cam3.tgt; G.tfar = []; for (let i = 0; i < 6; i++) { const p = G.makePed(0, 0, 0); p.x = t.x + 620 + i * 12; p.y = t.z + 40; p.keepTest = true; p.state = 'idle'; p.timer = 99; G.peds.push(p); G.tfar.push(p); } })()"""); time.sleep(0.6)
+    check("distant pedestrians are drawn as instanced figures", js("G.render.farPeople()") >= 6, js("G.render.farPeople()"))
+    js("G.peds = G.peds.filter(p => !p.keepTest)")
+    # ---- realism pass 3: driving
+    box = js("""(() => { const c = new G.Car('sedan', 0, 0, 0); c.sim = true; c.ctrl.t = 1; const gears = new Set(); let maxRpm = 0, t = 0, shifts = 0, pg = 1;
+        while (t < 14) { c.update(1/60, { grip: 1 }); t += 1/60; gears.add(c.gear); maxRpm = Math.max(maxRpm, c.rpm); if (c.gear !== pg) { shifts++; pg = c.gear; } }
+        const top = c.gear; c.ctrl.t = 0; for (let i = 0; i < 240; i++) c.update(1/60, { grip: 1 });
+        return { auto: c.autoBox, gears: [...gears].sort(), maxRpm, shifts, top, coastRpm: c.rpm, speed: c.speed }; })()""")
+    check("automatic gearbox works through the gears with real revs", box["auto"] and len(box["gears"]) >= 5 and 5500 < box["maxRpm"] <= 7350 and box["shifts"] >= 4, str(box))
+    grip = js("""(() => { const run = (surfGrip, brake) => { const c = new G.Car('sedan', 0, 0, 0); c.sim = true; c.vx = 190; c.vF = 190; c.speed = 190; c.ctrl.s = 1; c.ctrl.t = brake; let peak = 0, yaw = 0, bad = false;
+          for (let i = 0; i < 150; i++) { c.update(1/60, { grip: surfGrip }); peak = Math.max(peak, Math.abs(c.ayLat)); yaw = Math.max(yaw, Math.abs(c.r)); if (!isFinite(c.x + c.y + c.a + c.r)) bad = true; }
+          return { peak, yaw, bad, load: c.load.reduce((a, b) => a + b, 0) }; };
+        return { dry: run(1, 0), wet: run(0.78, 0), braking: run(1, -1) }; })()""")
+    check("cornering grip saturates at a realistic level (about 1 to 1.6 g dry)", 0.9 < grip["dry"]["peak"] < 1.7 and not grip["dry"]["bad"] and abs(grip["dry"]["load"] - 1) < 1e-6, f"peak {grip['dry']['peak']:.2f} g")
+    check("a wet road gives less cornering grip", grip["wet"]["peak"] < grip["dry"]["peak"] - 0.1, f"{grip['wet']['peak']:.2f} g vs {grip['dry']['peak']:.2f} g")
+    check("braking hard in a corner costs cornering grip (friction circle)", grip["braking"]["peak"] < grip["dry"]["peak"] and not grip["braking"]["bad"], f"{grip['braking']['peak']:.2f} g")
+    soft = js("""(() => { const W = G.world, T = 64; let spot = null; for (let ty = 2; ty < W.N - 2 && !spot; ty += 2) for (let tx = 2; tx < W.N - 2; tx += 2) if (W.tiles[ty * W.N + tx] === W.TT.GRASS && !W.pointBlocked(tx * T + 32, ty * T + 32, 30)) { spot = [tx * T + 32, ty * T + 32]; break; }
+        const c = new G.Car('sedan', spot[0], spot[1], 0); c.sim = true; c.vx = 150; c.vF = 150; c.speed = 150; for (let i = 0; i < 30; i++) { c.x = spot[0]; c.y = spot[1]; c.update(1/60, { grip: 1 }); } return c.surf; })()""")
+    check("grass grips less than tarmac", soft < 0.8, f"surface grip {soft:.2f}")
+    # ---- realism pass 3: pedestrians
+    pair = js("""(() => { for (let i = 0; i < 400; i++) { const p = G.makePed(0, 0, 100); if (Math.sign(p.off) !== p.dir) return 'side'; } return 'ok'; })()""")
+    check("pedestrians keep to one side of the pavement", pair == "ok", pair)
+    check("some pedestrians walk in pairs", js("G.peds.some(p => p.buddy)") or js("G.peds.length") < 8, f"{js('G.peds.filter(p => p.buddy).length')} of {js('G.peds.length')}")
     check("audio realism nodes built", js("(() => { G.audio.init(); return !!G.audio.ctx; })()"))
     check("no runtime error", not js("G.lastError ? String(G.lastError) : ''"), js("G.lastError ? String(G.lastError) : ''"))
     check("fps", js("G.fps") >= 25, js("G.fps"))

@@ -544,6 +544,29 @@
     const c0 = (LAT(h.k) + 1) * T;
     for (let u = LAT(h.a) + 4, s = 1; u < LAT(h.b) - 2; u += 5, s = -s) { const along = (u + 0.5) * T, off = s * (T + 22); W.lights.push(h.h ? { x: along, y: c0 + off, hwy: 1 } : { x: c0 + off, y: along, hwy: 1 }); }
   }
+  // ----- street furniture between junctions: mid-block lamps and small clusters (a bench and a planter, a bus
+  // shelter, a hydrant and bollards, cafe tables). Drawn only: nothing here collides, and its own random stream
+  // leaves the rest of the map exactly as it was. Pedestrians walk 82-110 units from the road centre, so the
+  // kerb things sit at ~72 and the building-side things at ~118. -----
+  W.props = [];
+  {
+    const pr = mulberry32(90210), clear = (x, y, r) => W.tileAt(x, y) === TT.WALK && !W.pointBlocked(x, y, r) && !W.hay.some((h) => dist(x, y, h.x, h.y) < 60);
+    for (const n of nodes) for (const id of n.nb) {
+      const m = nodes[id]; if (m.id <= n.id || n.hwy || m.hwy) continue;
+      const L = dist(n.x, n.y, m.x, m.y); if (L < 420) continue;
+      const dx = (m.x - n.x) / L, dy = (m.y - n.y) / L;
+      for (const sd of [-1, 1]) {
+        const px = -dy * sd, py = dx * sd, out = Math.atan2(py, px); // (px, py): from the road centre out to this pavement
+        const nl = Math.max(1, Math.round(L / 380) - 1);
+        for (let k = 1; k <= nl; k++) { const u = (L * k) / (nl + 1), x = n.x + dx * u + px * (T + 9), y = n.y + dy * u + py * (T + 9); if (clear(x, y, 6)) W.lights.push({ x, y, a: out + Math.PI, mid: 1 }); }
+        for (let u = 150 + pr() * 80; u < L - 150; u += 120 + pr() * 170) {
+          const r = pr(), type = r < 0.3 ? "rest" : r < 0.44 ? "stop" : r < 0.78 ? "kerb" : "cafe", hue = pr();
+          const x = n.x + dx * u + px * (T + 32), y = n.y + dy * u + py * (T + 32); // the middle of the pavement
+          if (clear(x, y, 4) && clear(x + px * 20, y + py * 20, 5) && clear(x - px * 22, y - py * 22, 4) && clear(x + dx * 20, y + dy * 20, 4) && clear(x - dx * 20, y - dy * 20, 4)) W.props.push({ x, y, a: out, type, hue });
+        }
+      }
+    }
+  }
   W.ramps = [];
   const rampSeg = (i1, j1, i2, j2, dir) => {
     const a = W.node(i1, j1), b = W.node(i2, j2);

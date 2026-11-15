@@ -39,6 +39,7 @@
       this.wrecked = false; this.braking = false; this.dents = []; this.wreckT = 0;
       this.manual = false; this.gear = 1; this.shiftT = 0; this.rpm = IDLE; this.limiter = 0;
       this.sim = false; this.r = 0; this.delta = 0; this.axLong = 0; // tyre-model handling (player cars)
+      this.ayLat = 0; this.autoBox = false; this.surf = 1; this.load = [0.25, 0.25, 0.25, 0.25]; // sideways g, automatic gearbox in use, surface grip, share of the weight on FL / FR / RL / RR
       this.rotor = 0; this.ctrl.lift = 0; this.bob = Math.random() * 10;       // helicopter rotor speed, boat bobbing
     }
     // ---- manual gearbox (the clutch is automatic: a shift just cuts drive for a moment) ----
@@ -77,6 +78,12 @@
         // realistic powertrain (player cars on "realistic" handling): traction-limited launch, aero drag, real braking distances
         const real = this.sim && !s.bike && !s.boat;
         const v0 = vF;
+        if (real) { // loose or soft ground (grass, dirt, sand) grips less and drags more than tarmac
+          const tt = G.world.tileAt(this.x, this.y), TT = G.world.TT, soft = tt === TT.GRASS || tt === TT.PARK ? 0.72 : tt === TT.DIRT ? 0.78 : tt === TT.SAND ? 0.62 : 1;
+          this.surf += (soft - this.surf) * Math.min(1, dt * 6);
+          if (this.surf < 0.999) env = { grip: env.grip * this.surf };
+        }
+        this.autoBox = real && !this.manual && !s.pedal;
         if (real) vF = this.realDrive(vF, c, max, acc, dt, env);
         else if (this.manual && !s.pedal) vF = this.manualDrive(vF, c, max, acc, dt);
         else if (c.t > 0) { if (vF < -10) vF += 900 * dt * c.t; else if (vF < max) vF += acc * c.t * dt * (1 - Math.max(0, vF) / max * 0.55); }
@@ -84,6 +91,7 @@
         else vF -= Math.sign(vF) * Math.min(Math.abs(vF), 130 * dt);
         if (!real) this.wheelspin = 0;
         if (c.hb) vF -= Math.sign(vF) * Math.min(Math.abs(vF), (real ? 70 : 240) * dt);
+        if (real && this.surf < 0.999) vF -= Math.sign(vF) * Math.min(Math.abs(vF), (1 - this.surf) * (30 + Math.abs(vF) * 0.22) * dt); // soft ground drags
         if (vF > max * 1.02) vF -= (vF - max) * 2 * dt;
         if (s.bike && this.z === 0) { // two wheels: brakes and grip are weaker, the rear steps out under the handbrake
           if (c.hb && Math.abs(vF) > 80) vR += c.s * Math.abs(vF) * 0.9 * dt;
@@ -105,29 +113,41 @@
       }
       this.speed = Math.hypot(this.vx, this.vy);
       this.x += this.vx * dt; this.y += this.vy * dt;
-      if (!this.manual) this.rpm = 0;
+      if (!this.manual && !this.autoBox) this.rpm = 0;
       if (s.boat) this.keepInWater(ox, oy, oa);
-      if (!this.sim) { this.r = 0; this.delta = 0; this.axLong = 0; } // tyre-model state starts fresh next time
+      if (!this.sim) { this.r = 0; this.delta = 0; this.axLong = 0; this.ayLat = 0; this.autoBox = false; this.surf = 1; } // tyre-model state starts fresh next time
     }
     // ---- tyre model (bicycle model): front/rear slip angles -> saturating lateral forces -> sideways velocity + yaw ----
+    // Each axle's grip follows a tyre curve that peaks at about 10 degrees of slip and then falls away a little, so a
+    // slide has to be caught, not just waited out. The friction circle shares that grip with braking and drive:
+    // brake hard into a corner and the front washes wide; spin the driven rear wheels and the tail steps out.
     tyres(u, v, c, env, dt) {
       const s = this.s, L = s.w, lf = L * 0.32, lr = L * 0.32, Iz = (lf * lf + lr * lr) * 0.5;
-      const gLat = 59 * 1.5 * (s.grip / 7.5) * env.grip;    // peak sideways grip: ~1.4 g for a saloon, ~1.9 g for a supercar (1 g = 59 units/s^2)
+      const G1 = 59, mu = (s.grip / 7.5) * env.grip;
+      const gLat = G1 * 1.5 * mu;                             // peak sideways grip: ~1.5 g for a saloon, ~2 g for a supercar (1 g = 59 units/s^2)
+      const AX = 1.1;                                         // the two axles share that grip (this used to be 2, which let every car corner at nearly 3 g)
+      const curve = (x) => Math.sin(1.3 * Math.atan(2.2 * x)); // x = slip angle / ~0.14 rad: peaks at 1 near x = 1.2 (about 10 degrees), settles at ~0.89 in a full slide
       const N = 8, h = dt / N;
+      // how much of each axle's grip the brakes / the engine are already using
+      const useF = c.t < 0 && u > 10 ? clamp(Math.abs(this.axLong) / (G1 * 1.2 * mu), 0, 1) * 0.6 : 0;
+      const useR = Math.max(useF * 0.7, clamp((this.wheelspin || 0) * 1.4, 0, 0.75));
+      const circF = Math.sqrt(1 - useF * useF * 0.75), circR = Math.sqrt(1 - useR * useR);
+      let ay = 0;
       for (let k = 0; k < N; k++) {
         const spd = Math.abs(u), dir = u >= 0 ? 1 : -1;
         const steerMax = 0.62 / (1 + spd / 230);              // less lock at speed, like a real steering rack
         this.delta += (c.s * steerMax - this.delta) * Math.min(1, h * 9);
         // weight transfer: braking loads the front (more steering), accelerating loads the rear
         const wf = clamp(0.5 - this.axLong * 0.0025, 0.3, 0.7), wr = 1 - wf;
-        const Ff_max = gLat * wf * 2, Fr_max = gLat * wr * 2 * (c.hb ? 0.32 : 1);
-        const Cf = Ff_max / 0.11, Cr = Fr_max / 0.13;
+        // a tyre carrying more load grips more, but not in proportion (load sensitivity): the heavier axle gives a little away
+        const Ff_max = gLat * wf * AX * (1.06 - 0.12 * wf) * circF, Fr_max = gLat * wr * AX * (1.06 - 0.12 * wr) * circR * (c.hb ? 0.32 : 1);
         const af = Math.atan2(v + lf * this.r, spd + 4) - this.delta * dir, ar = Math.atan2(v - lr * this.r, spd + 4);
-        const Ff = -Ff_max * Math.tanh((af * Cf) / Math.max(Ff_max, 1)), Fr = -Fr_max * Math.tanh((ar * Cr) / Math.max(Fr_max, 1));
+        const Ff = -Ff_max * curve(af / 0.14), Fr = -Fr_max * curve(ar / 0.155);
         let dv = Ff * Math.cos(this.delta) + Fr - u * this.r, dr = (lf * Ff * Math.cos(this.delta) - lr * Fr) / Iz;
         // below walking pace blend into a kinematic model (the tyre equations get stiff as speed -> 0)
         const kin = clamp(1 - (spd - 25) / 70, 0, 1);
         if (kin > 0) { const rK = (u * Math.tan(this.delta)) / (lf + lr); this.r += (rK - this.r) * Math.min(1, h * 25) * kin; v *= 1 - Math.min(1, h * 20) * kin; dr *= 1 - kin; dv *= 1 - kin; }
+        ay += (Ff * Math.cos(this.delta) + Fr) * (1 - kin);
         // cornering costs speed: the front tyre's force points partly backwards, and sliding tyres scrub
         v += dv * h; this.r += dr * h;
         const drag = (Math.abs(Ff * Math.sin(this.delta)) + Math.abs(v) * 0.9) * (1 - kin) * h; // never enough to reverse the car
@@ -135,6 +155,10 @@
         this.r *= 1 - h * 0.6; // a little yaw damping (suspension, tyre scrub)
         this.a += this.r * h;
       }
+      // sideways g, and from it and the fore/aft g the share of the car's weight on each wheel (FL, FR, RL, RR)
+      this.ayLat += (ay / N / G1 - this.ayLat) * Math.min(1, dt * 10);
+      const fb = clamp(-this.axLong / G1 * 0.11, -0.2, 0.2), lr2 = clamp(this.ayLat * 0.13, -0.22, 0.22);
+      this.load[0] = 0.25 + fb / 2 + lr2 / 2; this.load[1] = 0.25 + fb / 2 - lr2 / 2; this.load[2] = 0.25 - fb / 2 + lr2 / 2; this.load[3] = 0.25 - fb / 2 - lr2 / 2;
       return [u, v];
     }
     // ---- boats: stay on water (bridges count as water underneath) ----
@@ -180,7 +204,7 @@
     realDrive(vF, c, max, acc, dt, env) {
       const s = this.s, G1 = 59, mu = (s.grip / 7.5) * env.grip, v = Math.abs(vF), x = v / max, sg = Math.sign(vF);
       const trac = G1 * 0.95 * mu, brk = G1 * 1.2 * mu, drag = v > 0.5 ? 7 + 38 * x * x : 0, accR = acc * 0.14; // accR: 1st-gear pull (~1 g for a saloon, ~2 g for a supercar)
-      let a = 0; this.wheelspin = 0;
+      let a = 0; this.wsPrev = this.wheelspin || 0; this.wheelspin = 0;
       if (this.manual && !s.pedal) {
         const after = this.manualDrive(vF, c, max, accR, dt);
         a = (after - vF) / Math.max(dt, 1e-4);
@@ -188,15 +212,44 @@
         else if (Math.abs(a) > trac) { this.wheelspin = Math.abs(a) / trac - 1; a = Math.sign(a) * trac; }
         a -= sg * drag;
       } else if (c.t > 0) {
-        if (vF < -10) a = brk * c.t; // rolling backwards: the brakes stop it first
-        else { const eng = (accR * Math.max(0, 1 - x * x) + drag) * c.t; this.wheelspin = eng > trac ? eng / trac - 1 : 0; a = Math.min(eng, trac) - sg * drag; }
+        if (vF < -10) { a = brk * c.t; this.autoGear(v, 0, max, dt); } // rolling backwards: the brakes stop it first
+        else {
+          // the pull follows the engine's torque curve in the gear the automatic picked, and drops for a moment on each shift
+          const k = this.autoGear(v, c.t, max, dt);
+          const eng = (accR * Math.max(0, 1 - x * x) * k + drag) * c.t; this.wheelspin = eng > trac ? eng / trac - 1 : 0; a = Math.min(eng, trac) - sg * drag;
+        }
       } else if (c.t < 0) {
-        if (vF > 10) { a = -brk * -c.t; this.braking = true; }
-        else { const rmax = max * 0.35, eng = (accR * 0.6 * Math.max(0, 1 - (v / rmax) ** 2) + drag) * -c.t; a = -Math.min(eng, trac) - sg * drag; }
-      } else a = -sg * (drag + (v > 3 ? G1 * 0.06 : 0)); // coasting: drag + a little engine braking
+        if (vF > 10) { a = -brk * -c.t; this.braking = true; this.autoGear(v, 0, max, dt); }
+        else { const rmax = max * 0.35, eng = (accR * 0.6 * Math.max(0, 1 - (v / rmax) ** 2) + drag) * -c.t; a = -Math.min(eng, trac) - sg * drag; this.gear = -1; this.rpm += (IDLE + clamp(v / rmax, 0, 1) * (RED - IDLE) * 0.8 - this.rpm) * Math.min(1, dt * 12); }
+      } else { // coasting: drag + engine braking, stronger in a low gear at high revs
+        this.autoGear(v, 0, max, dt);
+        const r01 = clamp((this.rpm - IDLE) / (RED - IDLE), 0, 1);
+        a = -sg * (drag + (v > 3 ? G1 * (0.04 + 0.07 * r01) : 0));
+      }
       const nv = vF + a * dt;
       // resistive forces stop the car, they never push it backwards
       return sg !== 0 && Math.sign(nv) !== sg && !(c.t > 0 && vF < 0) && !(c.t < 0 && vF <= 10) ? 0 : nv;
+    }
+    // ---- automatic gearbox (realistic handling): picks one of the six gears from road speed and throttle, like a
+    // torque-converter automatic. It holds a gear longer and kicks down under a heavy foot, and shifts up early when
+    // you cruise. Returns the drive multiplier: the torque curve at the current revs, cut briefly during a shift. ----
+    autoGear(v, thr, max, dt) {
+      if (this.manual) return 1;
+      const scale = max / this.s.max, top = (g) => this.s.max * RAT[g] * scale;
+      let g = clamp(this.gear | 0, 1, 6);
+      this.shiftT = Math.max(0, this.shiftT - dt);
+      if (this.shiftT <= 0) {
+        const r = v / top(g), up = 0.5 + 0.44 * thr, down = 0.2 + 0.3 * thr;  // revs (0..1 of the redline) to shift up / down at
+        if (r > up && g < 6) { g++; this.shiftT = 0.16; }
+        else if (g > 1 && v / top(g - 1) < down + 0.14) { g--; this.shiftT = 0.12; }
+      }
+      this.gear = g;
+      const want = IDLE + clamp(v / top(g), 0, 1.02) * (RED - IDLE), slip = thr > 0 && want < IDLE + 1500 ? IDLE + 600 + 900 * thr : 0; // the converter lets the engine rev when pulling away
+      const flare = (this.wsPrev || 0) > 0.25 && thr > 0 ? Math.min(2200, (this.wsPrev - 0.25) * 1800) : 0; // spinning wheels let the revs flare
+      this.rpm += (Math.min(RED, Math.max(IDLE, want, slip) + flare) - this.rpm) * Math.min(1, dt * (this.shiftT > 0 ? 9 : 16));
+      this.limiter = 0;
+      const tq = torque(clamp((this.rpm - IDLE) / (RED - IDLE), 0, 1.1));
+      return (0.82 + 0.18 * (tq - 0.45) / 0.55) * (this.shiftT > 0 ? 0.3 : 1); // never more than the car's rated pull
     }
     // ---- crash damage: crumple zones (front, rear, left, right) in body units, used to deform the 3D body ----
     hitFrom(nx, ny, imp) {

@@ -256,13 +256,15 @@
     updateHUD();
   };
   // a soft light in the hero's colour so suits read clearly at night
-  let heroLight = null;
+  let heroLight = null, agentOn = null;
+  const WHITE = new THREE.Color("#ffffff"), lightPos = new THREE.Vector3();
   A.light = function () {
     if (!heroLight) return;
     const h = HZ.LIST[P.hero], hr = G.state.hour, night = hr > 19.5 || hr < 6 ? 1 : hr > 17.5 ? (hr - 17.5) / 2 : hr < 7.5 ? (7.5 - hr) / 1.5 : 0;
-    heroLight.color.set(h.color).lerp(new THREE.Color("#ffffff"), 0.45); heroLight.intensity = G.state.started && !P.car ? 1500 * night + 80 : 0;
-    const cp = G.render.camera.position, hp = V3(P.x, P.y, (P.z || 0) + 14); heroLight.position.copy(hp).lerp(cp, Math.min(0.6, 30 / Math.max(1, hp.distanceTo(cp)))); heroLight.position.y += 14;
-    document.body.classList.toggle("agentOn", hud.classList.contains("on"));
+    // (kept low: enough to read the suit, not enough to floodlight the pavement around the hero)
+    heroLight.color.set(h.color).lerp(WHITE, 0.45); heroLight.intensity = G.state.started && !P.car ? 520 * night + 60 : 0;
+    const cp = G.render.camera.position, hp = lightPos.set(P.x, (P.z || 0) + 14, P.y); heroLight.position.copy(hp).lerp(cp, Math.min(0.6, 30 / Math.max(1, hp.distanceTo(cp)))); heroLight.position.y += 14;
+    const on = hud.classList.contains("on"); if (on !== agentOn) { agentOn = on; document.body.classList.toggle("agentOn", on); }
   };
   A.clear = () => { for (const o of objs) if (o.mesh) scene.remove(o.mesh); objs.length = 0; };
 

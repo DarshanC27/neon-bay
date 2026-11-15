@@ -32,7 +32,8 @@
   };
   U.bigCount = function (t) { const b = $("bigcount"); b.textContent = t; b.classList.remove("show"); void b.offsetWidth; b.classList.add("show"); };
   U.objective = function (t) { const o = $("objective"); if (o.textContent !== t) { o.textContent = t; o.classList.toggle("on", !!t); } };
-  U.prompt = function (t) { const p = $("prompt"); if (t) { p.textContent = t; p.classList.add("on"); } else p.classList.remove("on"); };
+  let promptText = null;
+  U.prompt = function (t) { t = t || ""; if (t === promptText) return; promptText = t; const p = $("prompt"); if (t) { p.textContent = t; p.classList.add("on"); } else p.classList.remove("on"); };
   U.radio = function (name) { const r = $("radio"); r.textContent = name; r.classList.remove("show"); void r.offsetWidth; r.classList.add("show"); };
   let lastDistrict = "";
 
@@ -64,28 +65,35 @@
   };
 
   // ---------- HUD ----------
-  let shownMoney = 0;
+  let shownMoney = 0, mapT = 0, speedoKey = "", speedoT = -1;
+  // The HUD is plain DOM: writing a value that has not changed still costs style and layout work every frame,
+  // so each field is only written when its text / style really changes.
+  const hudLast = {};
+  const setText = (id, v) => { if (hudLast[id] !== v) { hudLast[id] = v; $(id).textContent = v; } };
+  const setHtml = (id, v) => { if (hudLast[id] !== v) { hudLast[id] = v; $(id).innerHTML = v; } };
+  const setStyle = (id, prop, v) => { const k = id + "." + prop; if (hudLast[k] !== v) { hudLast[k] = v; $(id).style[prop] = v; } };
+  const setClass = (id, cls, on) => { const k = id + "#" + cls; if (hudLast[k] !== on) { hudLast[k] = on; $(id).classList.toggle(cls, on); } };
   U.update = function (dt) {
     const s = G.state;
     shownMoney += (s.money - shownMoney) * Math.min(1, dt * 6);
     if (Math.abs(s.money - shownMoney) < 1) shownMoney = s.money;
-    $("money").textContent = fmtMoney(shownMoney);
+    setText("money", fmtMoney(shownMoney));
     const hh = Math.floor(s.hour), mi = Math.floor((s.hour % 1) * 60);
-    $("clock").textContent = `${String(hh).padStart(2, "0")}:${String(mi).padStart(2, "0")}`;
-    $("weather").textContent = G.weather.rain > 0.3 ? "🌧️" : s.hour > 20 || s.hour < 5.5 ? "🌙" : s.hour > 17.5 ? "🌇" : "☀️";
+    setText("clock", `${String(hh).padStart(2, "0")}:${String(mi).padStart(2, "0")}`);
+    setText("weather", G.weather.rain > 0.3 ? "🌧️" : s.hour > 20 || s.hour < 5.5 ? "🌙" : s.hour > 17.5 ? "🌇" : "☀️");
     const st = G.wanted.stars, blink = !G.wanted.seen && st > 0 && Math.floor(G.time * 4) % 2;
-    $("stars").innerHTML = [0, 1, 2, 3, 4].map((i) => `<span class="${i < st ? (blink ? "blink" : "on") : ""}">★</span>`).join("");
+    setHtml("stars", [0, 1, 2, 3, 4].map((i) => `<span class="${i < st ? (blink ? "blink" : "on") : ""}">★</span>`).join(""));
     const d = W.districtAt(P.x, P.y);
     if (d !== lastDistrict) { lastDistrict = d; const el = $("district"); el.textContent = W.DISTRICT_NAMES[d] || d; el.classList.remove("show"); void el.offsetWidth; el.classList.add("show"); }
-    $("hpbar").style.width = (P.car ? (P.car.hp / P.car.s.hp) * 100 : P.hp) + "%";
-    $("hpbar").style.background = P.car ? "#22d3ee" : "#19f5a0";
-    $("nitrobar").style.width = P.nitro * 100 + "%";
-    $("hplabel").textContent = P.car ? "CAR" : "HP";
+    setStyle("hpbar", "width", Math.round((P.car ? (P.car.hp / P.car.s.hp) * 100 : P.hp) * 2) / 2 + "%");
+    setStyle("hpbar", "background", P.car ? "#22d3ee" : "#19f5a0");
+    setStyle("nitrobar", "width", Math.round(P.nitro * 200) / 2 + "%");
+    setText("hplabel", P.car ? "CAR" : "HP");
     const m = G.missions.active;
-    $("timer").textContent = m && m.timer != null && m.kind !== "race" ? `⏱ ${Math.max(0, Math.ceil(m.timer))}s` : "";
-    $("timer").classList.toggle("urgent", !!(m && m.timer != null && m.timer < 15));
+    setText("timer", m && m.timer != null && m.kind !== "race" ? `⏱ ${Math.max(0, Math.ceil(m.timer))}s` : "");
+    setClass("timer", "urgent", !!(m && m.timer != null && m.timer < 15));
     if (!m && !G.state.objectiveHold) U.objective("");
-    drawMinimap(dt);
+    mapT -= dt; if (mapT <= 0) { mapT = 1 / 31; drawMinimap(Math.max(dt, 1 / 31)); } // the minimap repaints at ~30 Hz
     drawSpeedo();
     U.updateDialog(dt);
   };
@@ -110,8 +118,9 @@
     mmc.setTransform(1, 0, 0, 1, 0, 0);
     const toMM = (x, y) => { const dx = (x - P.x) * scale, dy = (y - P.y) * scale, c = Math.cos(rot), s = Math.sin(rot); return [R + dx * c - dy * s, R + dx * s + dy * c]; };
     if (routePts.length > 1) {
-      mmc.strokeStyle = "#c77dff"; mmc.lineWidth = 5; mmc.lineJoin = "round"; mmc.shadowColor = "#c77dff"; mmc.shadowBlur = 8;
-      mmc.beginPath(); routePts.forEach((p, i) => { const [x, y] = toMM(p.x, p.y); i ? mmc.lineTo(x, y) : mmc.moveTo(x, y); }); mmc.stroke(); mmc.shadowBlur = 0;
+      mmc.lineJoin = "round"; mmc.beginPath(); routePts.forEach((p, i) => { const [x, y] = toMM(p.x, p.y); i ? mmc.lineTo(x, y) : mmc.moveTo(x, y); });
+      mmc.strokeStyle = "rgba(199,125,255,0.3)"; mmc.lineWidth = 11; mmc.stroke(); // soft glow: a wider, fainter stroke underneath (a canvas blur is far slower)
+      mmc.strokeStyle = "#c77dff"; mmc.lineWidth = 5; mmc.stroke();
     }
     for (const c of G.cars) if (c.driver === "police" && !c.wrecked) { const [x, y] = toMM(c.x, c.y); mmc.fillStyle = Math.floor(G.time * 6) % 2 ? "#ff2040" : "#2080ff"; mmc.beginPath(); mmc.arc(x, y, 4.5, 0, TAU); mmc.fill(); }
     for (const e of G.gang || []) if (e.state !== "down") { const [x, y] = toMM(e.x, e.y); mmc.fillStyle = "#3a86ff"; mmc.strokeStyle = "#fff"; mmc.lineWidth = 1; mmc.beginPath(); mmc.arc(x, y, 3.5, 0, TAU); mmc.fill(); mmc.stroke(); }
@@ -131,25 +140,29 @@
     if (G.net) G.net.drawMinimap(mmc, toMM, R);
     // player arrow
     mmc.save(); mmc.translate(R, R); mmc.rotate((P.car ? P.car.a : P.a) + rot);
-    mmc.fillStyle = "#fff"; mmc.shadowColor = "#fff"; mmc.shadowBlur = 6;
-    mmc.beginPath(); mmc.moveTo(10, 0); mmc.lineTo(-7, 7); mmc.lineTo(-3, 0); mmc.lineTo(-7, -7); mmc.closePath(); mmc.fill(); mmc.restore();
+    mmc.beginPath(); mmc.moveTo(10, 0); mmc.lineTo(-7, 7); mmc.lineTo(-3, 0); mmc.lineTo(-7, -7); mmc.closePath();
+    mmc.strokeStyle = "rgba(255,255,255,0.35)"; mmc.lineWidth = 5; mmc.lineJoin = "round"; mmc.stroke(); mmc.fillStyle = "#fff"; mmc.fill(); mmc.restore();
     // north marker
     const [nx, ny] = (() => { const c = Math.cos(rot), s = Math.sin(rot); return [R + (-(R - 12)) * -s, R + (-(R - 12)) * c]; })();
     mmc.fillStyle = "#ff4d6d"; mmc.font = "bold 12px Bahnschrift"; mmc.textAlign = "center"; mmc.textBaseline = "middle"; mmc.fillText("N", nx, ny);
     mmc.strokeStyle = "rgba(255,255,255,0.35)"; mmc.lineWidth = 3; mmc.beginPath(); mmc.arc(R, R, R - 4, 0, TAU); mmc.stroke();
     const tg = tgt ? Math.round(dist(P.x, P.y, tgt.x, tgt.y) / 10) * 10 : 0;
-    $("gpsdist").textContent = tgt ? `${tg >= 1000 ? (tg / 1000).toFixed(1) + " km" : tg + " m"}` : "";
+    setText("gpsdist", tgt ? `${tg >= 1000 ? (tg / 1000).toFixed(1) + " km" : tg + " m"}` : "");
   }
   function drawSpeedo() {
-    const c = P.car; $("speedoWrap").classList.toggle("on", !!c);
-    if (!c) return;
+    const c = P.car; setClass("speedoWrap", "on", !!c);
+    if (!c) { speedoKey = ""; speedoT = -1; return; }
     const S = sp.width, R = S / 2, kmh = Math.round(c.speed * 0.6), max = 400;
+    // repaint the dial only when something on it changed (speed, gear, revs, shift light)
+    const box = c.manual || c.autoBox, key = c.id + "|" + kmh + "|" + (c.s.air ? Math.round(c.z / 6) : box ? c.gear + "|" + Math.round(c.rpm / 60) + "|" + (c.rpm > 6570 ? Math.floor(G.time * 14) % 2 : 0) : (c.vF < -5 ? "R" : Math.floor(Math.abs(c.vF) / 110)));
+    if (key === speedoKey || G.time - speedoT < 1 / 31) return; speedoKey = key; speedoT = G.time; // at most ~30 repaints a second
     spc.clearRect(0, 0, S, S);
     const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25, frac = clamp(kmh / max, 0, 1);
     spc.lineCap = "round"; spc.lineWidth = 12;
     spc.strokeStyle = "rgba(255,255,255,0.08)"; spc.beginPath(); spc.arc(R, R, R - 16, a0, a1); spc.stroke();
     const g = spc.createLinearGradient(0, S, S, 0); g.addColorStop(0, "#22d3ee"); g.addColorStop(0.6, "#c77dff"); g.addColorStop(1, "#ff3df2");
-    spc.strokeStyle = g; spc.shadowColor = "#c77dff"; spc.shadowBlur = 14; spc.beginPath(); spc.arc(R, R, R - 16, a0, a0 + (a1 - a0) * frac); spc.stroke(); spc.shadowBlur = 0;
+    spc.beginPath(); spc.arc(R, R, R - 16, a0, a0 + (a1 - a0) * frac);
+    spc.strokeStyle = "rgba(199,125,255,0.22)"; spc.lineWidth = 22; spc.stroke(); spc.strokeStyle = g; spc.lineWidth = 12; spc.stroke(); // glow without a canvas blur
     spc.fillStyle = "rgba(255,255,255,0.5)"; spc.font = "11px Bahnschrift"; spc.textAlign = "center"; spc.textBaseline = "middle";
     for (let v = 0; v <= max; v += 80) { const a = a0 + (a1 - a0) * (v / max); spc.fillText(v, R + Math.cos(a) * (R - 36), R + Math.sin(a) * (R - 36)); }
     spc.fillStyle = "#fff"; spc.font = "bold 44px Bahnschrift"; spc.fillText(kmh, R, R - 4);
@@ -157,18 +170,18 @@
     if (c.s.air) { // helicopter: altitude above the ground instead of a gear
       const alt = Math.max(0, Math.round((c.z - W.groundAt(c.x, c.y)[0]) / 6));
       spc.font = "bold 18px Bahnschrift"; spc.fillStyle = "#22d3ee"; spc.fillText(`ALT ${alt} m`, R, R + 48);
-    } else if (c.manual) { // rev counter ring + shift light + big gear letter
+    } else if (box) { // rev counter ring + shift light + big gear letter (the automatic shows which gear it picked)
       const r01 = clamp((c.rpm - 900) / 6300, 0, 1), b0 = Math.PI * 0.8, b1 = Math.PI * 2.2;
       spc.lineWidth = 5; spc.strokeStyle = "rgba(255,255,255,0.1)"; spc.beginPath(); spc.arc(R, R, R - 30, b0, b1); spc.stroke();
       spc.strokeStyle = r01 > 0.86 ? "#ff3048" : r01 > 0.7 ? "#ffd60a" : "#19f5a0"; spc.beginPath(); spc.arc(R, R, R - 30, b0, b0 + (b1 - b0) * r01); spc.stroke();
       const g = c.gear < 0 ? "R" : c.gear === 0 ? "N" : String(c.gear), flash = r01 > 0.9 && Math.floor(G.time * 14) % 2;
       spc.font = "bold 26px Bahnschrift"; spc.fillStyle = flash ? "#ff3048" : "#ffd60a"; spc.fillText(g, R, R + 50);
-      spc.font = "10px Bahnschrift"; spc.fillStyle = "#aab"; spc.fillText(`${(c.rpm / 1000).toFixed(1)}k RPM · M`, R, R + 70);
+      spc.font = "10px Bahnschrift"; spc.fillStyle = "#aab"; spc.fillText(`${(c.rpm / 1000).toFixed(1)}k RPM · ${c.manual ? "M" : "A"}`, R, R + 70);
     } else {
       const gear = c.vF < -5 ? "R" : Math.max(1, Math.min(6, 1 + Math.floor(Math.abs(c.vF) / 110)));
       spc.font = "bold 16px Bahnschrift"; spc.fillStyle = "#ffd60a"; spc.fillText(gear, R, R + 46);
     }
-    $("carname").textContent = c.s.name;
+    setText("carname", c.s.name);
   }
 
   // ---------- full map ----------
@@ -317,6 +330,7 @@
       { label: "Character voices (TTS)", right: S.voices ? "ON" : "OFF", act: () => { S.voices = !S.voices; refresh(); } },
       { label: "Gearbox", right: S.manual ? "MANUAL" : "AUTOMATIC", act: () => { S.manual = !S.manual; if (P.car) { P.car.gear = 1; P.car.shiftT = 0; } refresh(); } },
       { label: "Graphics: bloom + film look", right: S.post === false ? "OFF" : "ON", act: () => { G.render.setPost(S.post === false); refresh(); } },
+      { label: "Graphics: adaptive quality", right: S.autoQuality === false ? "OFF" : "AUTO", act: () => { G.render.setQuality(S.autoQuality === false ? "auto" : 0); refresh(); } },
       { label: "Car handling", right: S.handling === "arcade" ? "ARCADE" : "REALISTIC", act: () => { S.handling = S.handling === "arcade" ? "realistic" : "arcade"; refresh(); } },
     ];
     const refresh = () => { const sel = menu ? menu.sel : 0; phoneMenu("Settings", items()); menu.sel = sel; renderMenu(); };

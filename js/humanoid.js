@@ -10,7 +10,8 @@
   const cyl = (r1, r2, h, n = 8) => geoCache[`c${r1},${r2},${h},${n}`] || (geoCache[`c${r1},${r2},${h},${n}`] = new THREE.CylinderGeometry(r1, r2, h, n));
   H.mat = (color, o = {}) => {
     const k = color + JSON.stringify(o);
-    return matCache[k] || (matCache[k] = new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.75, metalness: 0.05 }, o)));
+    // envMapIntensity: the level of sky lighting every plain material gets (same value as G.AMBIENT_ENV in render.js)
+    return matCache[k] || (matCache[k] = new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.75, metalness: 0.05, envMapIntensity: 0.42 }, o)));
   };
   const M = H.mat;
   function mesh(geo, mat, x = 0, y = 0, z = 0, parent) {

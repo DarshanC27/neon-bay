@@ -600,10 +600,10 @@
     @keyframes medalBox{0%{opacity:0}6%{opacity:1}85%{opacity:1}100%{opacity:0}}
     @keyframes medalSpin{0%{transform:scale(0) rotateY(720deg)}100%{transform:scale(1) rotateY(0)}}
     @keyframes starPop{0%{opacity:0;transform:scale(3)}100%{opacity:1;transform:scale(1)}}
-    #opArrow{position:fixed;width:64px;height:64px;margin:-32px 0 0 -32px;z-index:30;pointer-events:none;display:none;filter:drop-shadow(0 0 10px currentColor)}
-    #opArrow svg{width:100%;height:100%;animation:arrowBob .8s ease-in-out infinite alternate}
+    #opArrow{position:fixed;width:64px;height:64px;margin:-32px 0 0 -32px;z-index:30;pointer-events:none;display:none;will-change:transform}
+    #opArrow svg{width:100%;height:100%;animation:arrowBob .8s ease-in-out infinite alternate;filter:drop-shadow(0 0 10px currentColor);will-change:transform}
     #opArrow .d{position:absolute;top:62px;left:50%;transform:translateX(-50%);font:bold 13px Bahnschrift,sans-serif;color:#fff;text-shadow:0 1px 3px #000;white-space:nowrap}
-    @keyframes arrowBob{to{transform:scale(1.15)}}
+    @keyframes arrowBob{to{scale:1.15}}
     #opMeter{position:fixed;left:50%;bottom:86px;transform:translateX(-50%);width:420px;z-index:30;pointer-events:none;display:none;text-align:center}
     #opMeter .bar{height:12px;border-radius:7px;background:rgba(0,0,0,.6);overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.2)}
     #opMeter .bar i{display:block;height:100%;width:0;border-radius:7px;transition:width .15s;background:linear-gradient(90deg,#22d3ee,#c77dff,#ff3df2);box-shadow:0 0 14px #c77dff}
@@ -646,18 +646,23 @@
   C.updateUI = function () {
     const m = G.missions.active;
     const tgt = m ? G.missions.markers().find((k) => k.main) : C.available()[0];
-    if (!tgt || G.state.mode !== "play" || !G.render.project) { el.arrow.style.display = "none"; return; }
+    // every style below is written only when it changes, and the arrow moves with a transform (no layout work)
+    const A = arrowState, show = (v) => { if (A.disp !== v) { A.disp = v; el.arrow.style.display = v; } };
+    if (!tgt || G.state.mode !== "play" || !G.render.project) { show("none"); return; }
     const d = dist(P.x, P.y, tgt.x, tgt.y);
     const p = G.render.project(tgt.x, tgt.y, 30), [Wd, Hd] = G.render.size();
     const onScreen = !p.behind && p.sx > 60 && p.sx < Wd - 60 && p.sy > 60 && p.sy < Hd - 60;
-    if (onScreen && d < 900) { el.arrow.style.display = "none"; return; }
+    if (onScreen && d < 900) { show("none"); return; }
     let dx = p.sx - Wd / 2, dy = p.sy - Hd / 2; if (p.behind) { dx = -dx; dy = -dy; }
     const ang = Math.atan2(dy, dx), rx = Wd / 2 - 70, ry = Hd / 2 - 90, k = Math.min(rx / Math.abs(Math.cos(ang) || 1e-6), ry / Math.abs(Math.sin(ang) || 1e-6));
-    el.arrow.style.display = "block"; el.arrow.style.color = tgt.color || "#fff";
-    el.arrow.style.left = Wd / 2 + Math.cos(ang) * k + "px"; el.arrow.style.top = Hd / 2 + Math.sin(ang) * k + "px";
-    el.arrow.querySelector("svg").style.transform = `rotate(${ang + Math.PI / 2}rad)`;
-    el.arrow.querySelector(".d").textContent = d > 1000 ? (d / 1000).toFixed(1) + " km" : Math.round(d) + " m";
+    if (!A.svg) { A.svg = el.arrow.querySelector("svg"); A.txt = el.arrow.querySelector(".d"); el.arrow.style.left = "0px"; el.arrow.style.top = "0px"; }
+    show("block");
+    const col = tgt.color || "#fff"; if (A.col !== col) { A.col = col; el.arrow.style.color = col; }
+    const pos = `translate(${Math.round(Wd / 2 + Math.cos(ang) * k)}px,${Math.round(Hd / 2 + Math.sin(ang) * k)}px)`; if (A.pos !== pos) { A.pos = pos; el.arrow.style.transform = pos; }
+    const rot = Math.round((ang + Math.PI / 2) * 50) / 50; if (A.rot !== rot) { A.rot = rot; A.svg.style.transform = `rotate(${rot}rad)`; }
+    const txt = d > 1000 ? (d / 1000).toFixed(1) + " km" : Math.round(d / 5) * 5 + " m"; if (A.text !== txt) { A.text = txt; A.txt.textContent = txt; }
   };
+  const arrowState = {};
 
   // ================= phone: Missions app =================
   C.phone = function () {

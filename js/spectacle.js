@@ -156,7 +156,7 @@
       const grp = new THREE.Group(); grp.position.set(b.x + b.w / 2, b.h3, b.y + b.h / 2); grp.rotation.y = k % 2 ? 0 : Math.PI / 2; scene.add(grp);
       const board = new THREE.Mesh(new THREE.PlaneGeometry(150, 66), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.DoubleSide })); board.position.y = 60; grp.add(board);
       for (const x of [-50, 50]) { const pole = new THREE.Mesh(new THREE.BoxGeometry(4, 30, 4), poleM); pole.position.set(x, 14, 0); grp.add(pole); }
-      boards.push({ g, tex, ad: BB[k % BB.length], ph: k * 1.7 });
+      boards.push({ g, tex, ad: BB[k % BB.length], ph: k * 1.7, pos: grp.position });
     });
   }
   function paintBoard(bd, t) {
@@ -188,7 +188,7 @@
   S.flash = function (x, y, z, color) { if (!fwLight) return; fwLight.position.set(x, z, y); fwLight.color.set(color); fwK = 1; };
 
   // ---------- per-frame ----------
-  let paintT = 0, showT = 4;
+  let paintT = 0, showT = 4, paintN = 0;
   S.update = function (dt, time) {
     if (!ready) return;
     const n01 = dark();
@@ -201,7 +201,13 @@
     blimp.g.rotation.y = -Math.atan2(Math.cos(bt) * 1700, -Math.sin(bt) * 2100) + Math.PI; // nose along the path
     blimp.beacon.material.color.set(Math.floor(time * 2) % 2 ? 0xff2040 : 0x330008);
     paintT -= dt;
-    if (paintT <= 0) { paintT = 0.08; paintBlimp(time); for (const bd of boards) paintBoard(bd, time); }
+    if (paintT <= 0) { // repainting a sign means a canvas redraw + a texture upload: skip the ones too far away to read
+      paintT = 0.08; paintN++;
+      const cp = G.render.camera.position, nearCam = (p, r) => Math.abs(p.x - cp.x) < r && Math.abs(p.z - cp.z) < r;
+      const slow = paintN % 16 === 1; // far signs still get a fresh frame now and then (and their first one), so they never show blank
+      if (slow || nearCam(blimp.g.position, 3600)) paintBlimp(time);
+      boards.forEach((bd, k) => { if (slow || (nearCam(bd.pos, 2400) && (k + paintN) % 2 === 0)) paintBoard(bd, time); });
+    }
     // gulls
     for (const q of gulls) {
       const a = q.ph + time * q.sp, x = q.cx + Math.cos(a) * q.r, y = q.cy + Math.sin(a) * q.r;

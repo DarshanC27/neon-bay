@@ -164,18 +164,23 @@
     if (on !== wasOn) { ui.classList.toggle("on", on); if (!on) resetAll(); wasOn = on; }
     back.classList.toggle("on", !!BACK_MODES[st.mode]);
     if (!on) return;
-    const P = G.player, inCar = !!P.car;
-    $("bCar").innerHTML = inCar ? "<i>🚪</i>EXIT" : "<i>🚗</i>CAR";
-    $("bJump").innerHTML = inCar ? "<i>🛑</i>BRAKE" : G.heroes && G.heroes.LIST && G.heroes.LIST[P.hero] && G.heroes.LIST[P.hero].swing ? "<i>🕸️</i>SWING" : "<i>⤒</i>JUMP";
-    $("bSprint").innerHTML = inCar ? "<i>🔥</i>NITRO" : "<i>⚡</i>RUN";
-    $("bPunch").classList.toggle("hide", inCar); $("bSpecial").classList.toggle("hide", inCar);
-    if (inCar && P.car.s.air) { $("bJump").innerHTML = "<i>⬆</i>UP"; $("bSprint").innerHTML = "<i>⬇</i>DOWN"; }
-    $("tGyro").classList.toggle("down", !!T.gyro);
-    const man = inCar && P.car.manual; $("bGearUp").classList.toggle("hide", !man); $("bGearDn").classList.toggle("hide", !man);
-    const pr = document.getElementById("prompt"); $("bUse").classList.toggle("hot", !!(pr && pr.textContent.trim() && getComputedStyle(pr).opacity !== "0"));
-    const ab = document.getElementById("abilityBar"), agent = !!(ab && ab.classList.contains("on")) && !inCar;
-    for (const id of ["bAb1", "bAb2", "bAb3", "bUlt"]) $(id).classList.toggle("hide", !agent);
+    // this runs every frame on a phone: write to the page only when a label or a state really changed
+    const P = G.player, inCar = !!P.car, air = inCar && P.car.s.air;
+    setHtml("bCar", inCar ? "<i>🚪</i>EXIT" : "<i>🚗</i>CAR");
+    setHtml("bJump", air ? "<i>⬆</i>UP" : inCar ? "<i>🛑</i>BRAKE" : G.heroes && G.heroes.LIST && G.heroes.LIST[P.hero] && G.heroes.LIST[P.hero].swing ? "<i>🕸️</i>SWING" : "<i>⤒</i>JUMP");
+    setHtml("bSprint", air ? "<i>⬇</i>DOWN" : inCar ? "<i>🔥</i>NITRO" : "<i>⚡</i>RUN");
+    setCls("bPunch", "hide", inCar); setCls("bSpecial", "hide", inCar);
+    setCls("tGyro", "down", !!T.gyro);
+    const man = inCar && P.car.manual; setCls("bGearUp", "hide", !man); setCls("bGearDn", "hide", !man);
+    if (!promptEl) promptEl = document.getElementById("prompt");
+    setCls("bUse", "hot", !!(promptEl && promptEl.classList.contains("on") && promptEl.textContent.trim()));
+    if (!abilityEl) abilityEl = document.getElementById("abilityBar");
+    const agent = !!(abilityEl && abilityEl.classList.contains("on")) && !inCar;
+    for (const id of ["bAb1", "bAb2", "bAb3", "bUlt"]) setCls(id, "hide", !agent);
   }
+  const shown = {}; let promptEl = null, abilityEl = null;
+  function setHtml(id, v) { if (shown[id] !== v) { shown[id] = v; $(id).innerHTML = v; } }
+  function setCls(id, cls, on) { const k = id + "#" + cls; if (shown[k] !== on) { shown[k] = on; $(id).classList.toggle(cls, on); } }
   requestAnimationFrame(frame);
   T.reset = resetAll;
 

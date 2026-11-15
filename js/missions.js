@@ -138,7 +138,10 @@
   M.startRace = startRace;
 
   // ---------------- markers (world + minimap) ----------------
-  M.markers = function () {
+  // The HUD, the minimap and the 3D markers all ask for these lists every frame: build each once per frame.
+  // (ttl: seconds a list may be reused for; calls from outside the game loop always get a fresh list)
+  const perFrame = (fn, ttl = 0) => { let at = -1, t0 = -9, val = null; return function () { if (!G.inFrame) return fn(); if (at !== G.frameNo && !(ttl && val && G.time - t0 < ttl)) { val = fn(); t0 = G.time; } at = G.frameNo; return val; }; };
+  M.markers = perFrame(function () {
     const out = [];
     const m = M.active;
     if (m) {
@@ -157,8 +160,8 @@
     out.push({ x: poi("depot").x, y: poi("depot").y, color: "#ffa028", r: 46, icon: "📦", label: "E: Start a courier job", act: startDelivery });
     W.raceRoutes.forEach((r, i) => out.push({ x: r.start.x, y: r.start.y, color: r.color, r: 56, icon: "🏁", label: `E: Street race: ${r.name} (${fmtMoney(r.reward)})`, act: () => startRace(i) }));
     return out;
-  };
-  M.shops = function () {
+  });
+  M.shops = perFrame(function () {
     return [...(G.property ? G.property.markers() : []),
       { x: poi("spray").x, y: poi("spray").y, color: "#ff3df2", r: 60, icon: "🎨", label: "E: Spray Shack (respray, repair, lose the cops)", act: () => G.ui.shop("spray") },
       { x: poi("dealer").x, y: poi("dealer").y, color: "#22d3ee", r: 50, icon: "🚗", label: "E: Turbo Motors dealership", act: () => G.ui.shop("dealer") },
@@ -166,7 +169,7 @@
       { x: poi("burger").x, y: poi("burger").y, color: "#ff9f1c", r: 46, icon: "🍔", label: "E: Neon Bites", act: () => G.ui.shop("burger") },
       { x: poi("hospital").x, y: poi("hospital").y, color: "#ff4d6d", r: 46, icon: "✚", label: "E: Hospital", act: () => G.ui.shop("hospital") },
     ];
-  };
+  }, 0.2);
 
   // ---------------- update ----------------
   M.update = function (dt) {

@@ -23,7 +23,8 @@ function mulberry32(a) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-const fmtMoney = (n) => "$" + Math.floor(n).toLocaleString("en-US");
+const moneyCache = new Map(); // toLocaleString is slow, and the HUD asks for the same few amounts every frame
+const fmtMoney = (n) => { n = Math.floor(n); let s = moneyCache.get(n); if (s === undefined) { if (moneyCache.size > 400) moneyCache.clear(); s = "$" + n.toLocaleString("en-US"); moneyCache.set(n, s); } return s; };
 
 // ---------- input ----------
 const Input = { keys: {}, pressed: {}, mouse: { x: 0, y: 0, down: false, clicked: false, rclicked: false } };

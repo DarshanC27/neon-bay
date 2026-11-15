@@ -33,8 +33,17 @@
     p.s = c[0][0];
   }
   function makePed(bx, by, s) {
+    const dir = Math.random() < 0.5 ? 1 : -1; // people keep to one side of the pavement, so the two directions pass each other
     return { x: 0, y: 0, a: 0, vx: 0, vy: 0, walk: rand(10), skin: pick(SKIN), shirt: pick(SHIRTS), pants: pick(PANTS), hair: pick(HAIR),
-      state: "walk", speed: rand(36, 62), bx, by, s, dir: Math.random() < 0.5 ? 1 : -1, off: rand(-14, 14), timer: 0, bubble: 0 };
+      state: "walk", speed: rand(36, 62), bx, by, s, dir, off: dir * rand(3, 14), timer: 0, bubble: 0, gapT: rand(0.4) };
+  }
+  // now and then two people walk together: side by side, at the same pace, and they stop to chat together
+  function addCompanion(p) {
+    if (Math.random() > 0.22) return null;
+    const q = makePed(p.bx, p.by, p.s);
+    q.dir = p.dir; q.speed = p.speed; q.off = p.off - p.dir * 8.5; q.buddy = p; p.buddy = q;
+    const [x, y] = ringPos(q); q.x = x; q.y = y;
+    return q;
   }
   G.makePed = makePed; G.obstacleAhead = (car, range) => obstacleAhead(car, range);
   function blockOfPoint(x, y) { return [clamp(Math.floor((x / T - 4) / 12), 0, W.NB - 1), clamp(Math.floor((y / T - 4) / 12), 0, W.NB - 1)]; }
@@ -58,7 +67,11 @@
       if (p.timer <= 0 && (!carComing(p) || p.timer < -7)) { p.state = "cross"; p.a = Math.atan2(p.ty - p.y, p.tx - p.x); }
       return;
     }
-    if (p.state === "idle") { p.timer -= dt; if (p.timer <= 0) p.state = "walk"; return; } // stopped for a moment: phone, window shopping
+    if (p.state === "idle") { // stopped for a moment: phone, window shopping, or chatting with the person they walk with
+      p.timer -= dt; if (p.timer <= 0) p.state = "walk";
+      const b = p.buddy; if (b && b.state === "idle" && !b.remove) p.a += angDiff(p.a, Math.atan2(b.y - p.y, b.x - p.x)) * Math.min(1, dt * 5);
+      return;
+    }
     if (p.state === "cross") {
       const dx = p.tx - p.x, dy = p.ty - p.y, d = Math.hypot(dx, dy);
       if (d < 6) { p.state = "walk"; p.bx = p.nbx; p.by = p.nby; ringNearest(p); return; }
@@ -67,15 +80,29 @@
       return;
     }
     const before = Math.floor(p.s / (9 * T));
-    const pace = p.speed * (1 + G.weather.rain * 0.35); // people walk faster in the rain
+    // every third of a second: is someone slower just ahead on my side of the pavement? then fall in behind them
+    p.gapT = (p.gapT || 0) - dt;
+    if (p.gapT <= 0) {
+      p.gapT = 0.3; p.slow = 1;
+      for (const q of G.peds) {
+        if (q === p || q === p.buddy || q.bx !== p.bx || q.by !== p.by || q.dir !== p.dir || q.state === "flee" || q.state === "fleeAway") continue;
+        const gap = (q.s - p.s) * p.dir;
+        if (gap > 0 && gap < 26 && Math.abs(q.off - p.off) < 7) { p.slow = q.state === "walk" ? Math.min(1, (q.speed / p.speed) * (0.55 + gap / 58)) : 0.25; break; }
+      }
+    }
+    const pace = p.speed * (1 + G.weather.rain * 0.35) * (p.slow || 1); // people walk faster in the rain
     p.s += p.dir * pace * dt;
-    if (Math.random() < dt * 0.012) { p.state = "idle"; p.timer = rand(2, 6); }
+    if (Math.random() < dt * 0.012) {
+      p.state = "idle"; p.timer = rand(2, 6);
+      const b = p.buddy; if (b && b.state === "walk" && !b.remove && dist(b.x, b.y, p.x, p.y) < 30) { b.state = "idle"; b.timer = p.timer; }
+    }
     const [tx, ty, segA] = ringPos(p);
     if (p.state === "rejoin") {
       const dx = tx - p.x, dy = ty - p.y, d = Math.hypot(dx, dy);
       if (d < 8) p.state = "walk"; else { p.x += (dx / d) * p.speed * dt; p.y += (dy / d) * p.speed * dt; p.a = Math.atan2(dy, dx); p.walk += dt * 9; return; }
     }
-    p.x = tx; p.y = ty; p.a = segA + (p.dir < 0 ? Math.PI : 0); p.walk += dt * pace * 0.17;
+    p.x = tx; p.y = ty; p.walk += dt * pace * 0.17;
+    p.a += angDiff(p.a, segA + (p.dir < 0 ? Math.PI : 0)) * Math.min(1, dt * 7); // turn the corner, don't snap round it
     const after = Math.floor(p.s / (9 * T));
     if (before !== after && Math.random() < 0.22) { // at a corner: maybe cross the road
       const r = ringBounds(p.bx, p.by);
@@ -311,7 +338,7 @@
       const p = makePed(bx, by, rand(4 * 9 * T));
       const [x, y] = ringPos(p); p.x = x; p.y = y;
       const d = dist(x, y, tgt.x, tgt.y);
-      if (d > 600 && d < 1500) G.peds.push(p);
+      if (d > 600 && d < 1500) { p.a = ringPos(p)[2] + (p.dir < 0 ? Math.PI : 0); G.peds.push(p); const q = addCompanion(p); if (q) { q.a = p.a; G.peds.push(q); } }
     }
   };
   G.populateInitial = function () {
@@ -321,7 +348,7 @@
       if (!isBlock(bx, by)) continue;
       const p = makePed(bx, by, rand(4 * 9 * T));
       const [x, y] = ringPos(p); p.x = x; p.y = y;
-      if (dist(x, y, tgt.x, tgt.y) < 1500 && dist(x, y, tgt.x, tgt.y) > 120) G.peds.push(p);
+      if (dist(x, y, tgt.x, tgt.y) < 1500 && dist(x, y, tgt.x, tgt.y) > 120) { p.a = ringPos(p)[2] + (p.dir < 0 ? Math.PI : 0); G.peds.push(p); const q = addCompanion(p); if (q) { q.a = p.a; G.peds.push(q); } }
     }
     for (let i = 0; i < 40; i++) {
       const lp = W.randomLanePoint(tgt.x, tgt.y, 250, 1500);

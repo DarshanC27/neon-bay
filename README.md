@@ -113,6 +113,30 @@ mainland cities sit on the same road grid and are joined by highways:
   - Streets echo between tall buildings. There's a city hum, birds by day and crickets at night.
 - **City:** worn roads with patch repairs, cracks, manholes, polished wheel tracks and oil drips at the lights. Building bases are darker where they meet the ground, facades have rain streaks, and tree crowns are fuller and rounder.
 
+### Realism pass 3
+- **Light and air:**
+  - Everything is lit by the sky itself (image-based lighting): shaded walls pick up sky colour, and paint, glass and metal get soft highlights.
+  - Building windows are real glass on a matte wall. They mirror the sky by day and catch the sunset at dusk.
+  - The sun throws a warm glow across the sky, strongest where it meets the horizon haze.
+  - Distant streets fade into the air (aerial perspective), on top of the normal fog.
+  - Sun shadows use one tight box around what the camera sees, snapped to the shadow map, so they are about twice as sharp and do not swim.
+- **Wet roads:** rain collects in puddles on paved ground. The puddles mirror the sky and the neon, and the rest of the road just darkens and gets a sheen. Headlight and street-lamp pools fade on a wet road.
+- **Night:** softer headlight pools, a glow around every lamp head, and smoke and dust that are lit by the scene instead of glowing in the dark.
+- **Driving (Realistic handling):**
+  - The tyres follow a grip curve that peaks at about 10 degrees of slip and then falls away, so a slide has to be caught.
+  - A friction circle shares grip between cornering and braking or drive. Brake hard into a corner and the front washes wide; spin the rear wheels of a powerful car and the tail steps out.
+  - Grass, dirt and sand grip less and drag more than tarmac.
+  - The automatic has six real gears. It kicks down under a heavy foot, shifts up early when you cruise, and the rev counter and engine sound follow it.
+  - The body sits on springs: it leans, overshoots a little and settles, squats when it lands and shivers over rough ground.
+- **City life:**
+  - About 1,500 clusters of street furniture on the pavements: benches with bins and planters, bus shelters with lit adverts, hydrants, bollards, post boxes and cafe tables under parasols.
+  - About 500 more street lamps between the junctions.
+  - Pedestrians keep to one side of the pavement, queue behind slower walkers, turn corners smoothly, and some walk in pairs and stop to chat.
+- **Speed:**
+  - Buildings, signs and props are merged into a few big meshes per map chunk, and a car is about 10 meshes instead of 45.
+  - Distant pedestrians are drawn as instanced figures, parked cars are frozen until something touches them, and the HUD only touches the page when a value changes.
+  - **Adaptive quality** watches the frame rate. If the game cannot hold about 45 fps it re-renders shadows less often, then lowers the resolution, then halves the shadow map, and steps back up when there is headroom. Turn it off with Phone → Settings → *Graphics: adaptive quality*.
+
 ## 🎯 Campaign: 100 missions
 Press **P → 🎯 Missions** to see every chapter. The next mission is always marked on your map with its contact's face; walk or drive into the marker and press **E**. Completed missions can be replayed straight from the phone.
 

@@ -276,6 +276,7 @@
     const dt = Math.min(0.05, (now - last) / 1000); last = now; G.time += dt;
     fpsAcc += dt; fpsN++; if (fpsAcc > 1) { G.fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
     const S = G.state;
+    G.frameNo = (G.frameNo || 0) + 1; G.inFrame = true;
     try {
       G.controls.update(dt);
       handleKeys();
@@ -297,6 +298,7 @@
       if (S.mode !== "play" && S.mode !== "title") G.render.releaseMouse();
       if (S.started) G.ui.update(dt);
     } catch (err) { console.error(err); G.lastError = err; }
+    G.inFrame = false;
     Input.endFrame();
     requestAnimationFrame(frame);
   }
