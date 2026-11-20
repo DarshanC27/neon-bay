@@ -75,6 +75,7 @@
     camera.position.set(40 * T, 400, 40 * T); updateGround(true);
     buildPost();
     R.resize(); addEventListener("resize", R.resize);
+    warmShaders();
     // mouse look (pointer lock while playing)
     canvas.addEventListener("mousedown", () => { if (G.state.mode === "play" && document.pointerLockElement !== canvas && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* not allowed */ } } });
     // fallback when pointer lock is unavailable: hold the right mouse button and drag to look
@@ -363,7 +364,13 @@
   function updateStatics(dt) {
     staticT -= dt; if (staticT > 0) return; staticT = 0.2;
     const cx = camera.position.x, cz = camera.position.z, lim = Math.max(2600, scene.fog.far) + 400 + camera.position.y * 0.5;
-    for (const gr of statics.values()) { const [x, y] = gr.userData.rect; gr.visible = Math.hypot(Math.max(x - cx, 0, cx - x - GCH), Math.max(y - cz, 0, cz - y - GCH)) < lim; }
+    for (const gr of statics.values()) {
+      const [x, y] = gr.userData.rect, want = Math.hypot(Math.max(x - cx, 0, cx - x - GCH), Math.max(y - cz, 0, cz - y - GCH)) < lim, u = gr.userData;
+      // a chunk coming into view gets its shaders compiled in the background first (it is at the edge of the fog, so a
+      // few frames' wait is invisible), instead of stalling the frame it first appears in
+      if (want && !gr.visible && !u.ready && renderer.compileAsync) { if (!u.pending) { u.pending = true; asDrawn(() => renderer.compileAsync(gr, camera, scene)).then(() => { u.ready = true; }, () => { u.ready = true; }); } continue; }
+      gr.visible = want;
+    }
   }
   // ---------- baking: merge many small fixed meshes into one mesh per material (one draw call instead of dozens) ----------
   const _bv = new THREE.Vector3(), _bn = new THREE.Matrix3();
@@ -1025,7 +1032,8 @@
     envT = 2;
     ambientEnv(scene); // anything built since the last sweep (other modules add their own models) joins the sky lighting
     // re-render the reflection map only when the sky really changed (time of day moved on, or the weather did)
-    const key = Math.round(G.state.hour * 12) + "|" + Math.round(G.weather.rain * 12) + "|" + Math.round(n01 * 20);
+    // (each refresh stalls a frame for 30-100 ms, so only a visible change counts: ~20 game minutes, or a clear shift in light / rain)
+    const key = Math.round(G.state.hour * 3) + "|" + Math.round(G.weather.rain * 4) + "|" + Math.round(n01 * 6);
     if (key !== envKey) { envKey = key; refreshEnv(); }
   }
   function buildClouds() {
@@ -1365,6 +1373,24 @@
       if (o.interior) o.interior.visible = show;
       o.cabin.material = show ? carGlassClear : carGlass;
     }
+  }
+  // three.js builds a different shader for drawing into the post-processing target (linear, no tone mapping) than for
+  // drawing straight to the screen, so compile in the same state the frame is drawn in, or the work is wasted
+  function asDrawn(fn) {
+    const rt = renderer.getRenderTarget(), tm = renderer.toneMapping;
+    if (post) { renderer.setRenderTarget(post.sceneRT); renderer.toneMapping = THREE.NoToneMapping; }
+    try { return fn(); } finally { renderer.setRenderTarget(rt); renderer.toneMapping = tm; }
+  }
+  // Compile every shader during loading. Scenery beyond the fog is hidden, and three.js only compiles a material the
+  // first time it is drawn, so driving into a new district used to freeze the game for up to 0.7 s. One car of each
+  // type is built for the same reason, then thrown away.
+  function warmShaders() {
+    const tmp = [], hid = [];
+    for (const t in G.CAR_TYPES) { try { tmp.push(buildCar(new G.Car(t, camera.position.x, camera.position.z, 0)).root); } catch (e) { /* skip */ } }
+    scene.traverse((o) => { if (!o.visible && !o.isLight) { o.visible = true; hid.push(o); } }); // lights stay as they are: the light count is part of every shader
+    try { asDrawn(() => renderer.compile(scene, camera)); } catch (e) { /* compile is an optimisation only */ }
+    for (const o of hid) o.visible = false;
+    for (const r of tmp) scene.remove(r);
   }
   let carGlass, carChrome, blobMat, crackMat;
   // Car bodies: a side profile (bumper, sloped hood, raked windshield, tapered cabin, trunk) extruded across the
@@ -1855,8 +1881,9 @@
   }
 
   // ---------- frame ----------
-  let lastT = 0, frameDt = 1 / 60, lastN01 = 0, vgEl, flEl, vgV = -1, flV = -1;
+  let warmedPlay = false, lastT = 0, frameDt = 1 / 60, lastN01 = 0, vgEl, flEl, vgV = -1, flV = -1;
   R.draw = function (time, opts = {}) {
+    if (!warmedPlay && G.state.mode === "play") { warmedPlay = true; warmShaders(); } // again once the street is populated: people, parked cars, plates
     const dt = clamp(time - lastT, 0, 0.1); lastT = time; frameDt = dt;
     autoQuality();
     const n01 = lighting(G.state.hour, time); lastN01 = n01;

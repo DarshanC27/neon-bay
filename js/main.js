@@ -273,7 +273,9 @@
   let last = performance.now(), fpsAcc = 0, fpsN = 0;
   G.fps = 60;
   function frame(now) {
-    const dt = Math.min(0.05, (now - last) / 1000); last = now; G.time += dt;
+    // a slow frame (under 20 fps) used to play the game in slow motion, which felt like the car lagging behind the keys.
+    // Now the simulation catches up in steps of at most 1/20 s (the same step as before); everything else keeps the cap.
+    const dtFull = Math.min(0.1, Math.max(0, (now - last) / 1000)), dt = Math.min(0.05, dtFull); last = now; G.time += dtFull;
     fpsAcc += dt; fpsN++; if (fpsAcc > 1) { G.fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
     const S = G.state;
     G.frameNo = (G.frameNo || 0) + 1; G.inFrame = true;
@@ -283,7 +285,15 @@
       const attract = S.mode === "title";
       const sdt = dt * (G.timeScale || 1);
       if (S.mode === "play" && G.heroes.consumeHitstop(dt)) { /* hit-stop freeze frame */ }
-      else if (S.mode === "play" || attract) simulate(sdt, attract);
+      else if (S.mode === "play" || attract) {
+        const full = dtFull * (G.timeScale || 1), n = Math.max(1, Math.ceil(full / 0.05 - 1e-6));
+        if (n === 1) simulate(sdt, attract);
+        else { // one-shot key presses and clicks count in the first step only
+          const kp = Input.pressed, mc = Input.mouse.clicked, mr = Input.mouse.rclicked;
+          for (let i = 0; i < n; i++) { if (i === 1) { Input.pressed = {}; Input.mouse.clicked = Input.mouse.rclicked = false; } simulate(full / n, attract); }
+          Input.pressed = kp; Input.mouse.clicked = mc; Input.mouse.rclicked = mr;
+        }
+      }
       else if (S.mode === "cine") { G.finale.update(dt); G.render.updateFx(sdt); }
       G.finale.tick(dt);
       if (S.mode === "play") G.agents.update(sdt);

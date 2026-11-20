@@ -120,6 +120,12 @@ with sync_playwright() as p:
     shot("71_manual_bike_hud"); pg.keyboard.up("KeyW")
     js("G.settings.manual = false; G.exitCar()"); time.sleep(0.3)
     check("bicycle and new cars in the dealer", js("['bicycle','sportbike','suv','pickup','hatch'].every(t => G.CAR_TYPES[t] && G.CAR_TYPES[t].price)"))
+    check("realistic top speeds: 600 bike <= 260 km/h, bicycle <= 40 km/h", js("G.CAR_TYPES.sportbike.max * 0.6 <= 260 && G.CAR_TYPES.bicycle.max * 0.6 <= 40"))
+    js("(() => { const P = G.player; const c = new G.Car('sportbike', P.x + 20, P.y, 0); c.keep = true; G.cars.push(c); G.enterNearestCar(); window._mb = c; })()"); time.sleep(0.3)
+    pg.keyboard.down("KeyW"); time.sleep(1.2); pg.keyboard.up("KeyW")
+    kmh = js("Math.round(_mb.speed * 0.6)")
+    check("motorbike pulls away like a real 600 (not 300 km/h in a second)", 10 < kmh < 90, f"{kmh} km/h after 1.2 s")
+    js("G.exitCar()"); time.sleep(0.3)
     # ---- realistic (tyre model) vs arcade handling
     js("(() => { G.debug.tp('velvet'); const P = G.player; const lp = G.world.randomLanePoint(P.x, P.y, 0, 300); const c = new G.Car('sports', lp.x, lp.y, lp.a); c.keep = true; G.cars.push(c); P.x = lp.x; P.y = lp.y + 20; G.enterNearestCar(); })()")
     pg.keyboard.down("KeyW"); time.sleep(1.2); pg.keyboard.down("KeyD"); time.sleep(0.8); pg.keyboard.up("KeyD"); pg.keyboard.up("KeyW")

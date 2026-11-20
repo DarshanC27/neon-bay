@@ -12,14 +12,14 @@
     hatch: { name: "Breeze HB", w: 39, h: 20, accel: 410, max: 330, grip: 7.8, hp: 85, mass: 0.85, price: 3500, colors: ["#d62828", "#f1faee", "#3a86ff", "#8ac926", "#ffbe0b", "#6c757d"] },
     suv: { name: "Terrain XL", w: 48, h: 24, accel: 440, max: 350, grip: 6.8, hp: 145, mass: 1.45, price: 8500, colors: ["#1b263b", "#e9ecef", "#495057", "#7f5539", "#2d6a4f", "#9d0208"] },
     pickup: { name: "Workhorse", w: 53, h: 24, accel: 410, max: 335, grip: 6.5, hp: 155, mass: 1.55, price: 7000, colors: ["#e63946", "#f8f9fa", "#264653", "#bc6c25", "#343a40"] },
-    sportbike: { name: "Raptor 600", w: 22, h: 8, accel: 720, max: 540, grip: 9.2, hp: 55, mass: 0.35, price: 7500, colors: ["#e63946", "#1d3557", "#ffd60a", "#f8f9fa", "#06d6a0", "#111111"], bike: true },
+    sportbike: { name: "Raptor 600", w: 22, h: 8, accel: 450, max: 420, grip: 9.2, hp: 55, mass: 0.35, price: 7500, colors: ["#e63946", "#1d3557", "#ffd60a", "#f8f9fa", "#06d6a0", "#111111"], bike: true },
     heli: { name: "Skylark H1", w: 50, h: 18, accel: 520, max: 420, grip: 0, hp: 160, mass: 1.6, price: 60000, colors: ["#e9ecef", "#1d3557", "#d62828", "#ffd60a", "#2a9d8f"], air: true },
     boat: { name: "Wave Runner 24", w: 50, h: 18, accel: 320, max: 340, grip: 2.4, hp: 130, mass: 1.4, price: 12000, colors: ["#f8f9fa", "#1d3557", "#e63946", "#ffb703", "#2a9d8f"], boat: true },
     // emergency services (not for sale): they share the van / pickup body shapes, with their own kit on top
     ambulance: { name: "Medic Unit", w: 56, h: 26, accel: 440, max: 390, grip: 7, hp: 220, mass: 1.7, colors: ["#f4f4f2"], ems: "med", body: "van" },
     firetruck: { name: "Engine 7", w: 80, h: 28, accel: 330, max: 330, grip: 6.4, hp: 340, mass: 2.6, colors: ["#b3121f"], ems: "fire", body: "van" },
     tow: { name: "Hook & Haul", w: 58, h: 25, accel: 380, max: 340, grip: 6.6, hp: 240, mass: 2, colors: ["#f6a700"], ems: "tow", body: "pickup" },
-    bicycle: { name: "Urban Pedal", w: 18, h: 6, accel: 150, max: 110, grip: 9.5, hp: 30, mass: 0.15, price: 400, colors: ["#3a86ff", "#ff006e", "#8ac926", "#f8f9fa", "#111111"], bike: true, pedal: true },
+    bicycle: { name: "Urban Pedal", w: 18, h: 6, accel: 45, max: 60, grip: 9.5, hp: 30, mass: 0.15, price: 400, colors: ["#3a86ff", "#ff006e", "#8ac926", "#f8f9fa", "#111111"], bike: true, pedal: true },
   });
   G.TRAFFIC_MIX = ["sedan", "sedan", "sedan", "compact", "compact", "taxi", "van", "muscle", "sports", "hatch", "hatch", "suv", "suv", "pickup", "sportbike"];
   // manual gearbox: each gear tops out (at the 7200 rpm redline) at this fraction of the car's top speed
@@ -42,6 +42,7 @@
       this.ayLat = 0; this.autoBox = false; this.surf = 1; this.load = [0.25, 0.25, 0.25, 0.25]; // sideways g, automatic gearbox in use, surface grip, share of the weight on FL / FR / RL / RR
       this.rotor = 0; this.ctrl.lift = 0; this.bob = Math.random() * 10;       // helicopter rotor speed, boat bobbing
     }
+    motoReal() { return this.s.bike && !this.s.pedal && this.driver === "player"; }
     // ---- manual gearbox (the clutch is automatic: a shift just cuts drive for a moment) ----
     gearTop(g = this.gear) { return this.s.max * (g > 0 ? RAT[g] : g < 0 ? REV_TOP : 1); }
     shift(dir) {
@@ -76,7 +77,9 @@
         const max = s.max * (c.boost ? 1.32 : 1) * dmg, acc = s.accel * (c.boost ? 1.7 : 1) * dmg;
         this.braking = false;
         // realistic powertrain (player cars on "realistic" handling): traction-limited launch, aero drag, real braking distances
-        const real = this.sim && !s.bike && !s.boat;
+        // the player's motorbike always uses it (on arcade physics a 600 hit 320 km/h in under two seconds); bicycles stay
+        // pedal-powered, and traffic bikes keep the arcade brakes the traffic AI plans its stops around
+        const real = (this.sim && !s.bike && !s.boat) || this.motoReal();
         const v0 = vF;
         if (real) { // loose or soft ground (grass, dirt, sand) grips less and drags more than tarmac
           const tt = G.world.tileAt(this.x, this.y), TT = G.world.TT, soft = tt === TT.GRASS || tt === TT.PARK ? 0.72 : tt === TT.DIRT ? 0.78 : tt === TT.SAND ? 0.62 : 1;
@@ -115,14 +118,14 @@
       this.x += this.vx * dt; this.y += this.vy * dt;
       if (!this.manual && !this.autoBox) this.rpm = 0;
       if (s.boat) this.keepInWater(ox, oy, oa);
-      if (!this.sim) { this.r = 0; this.delta = 0; this.axLong = 0; this.ayLat = 0; this.autoBox = false; this.surf = 1; } // tyre-model state starts fresh next time
+      if (!this.sim && !this.motoReal()) { this.r = 0; this.delta = 0; this.axLong = 0; this.ayLat = 0; this.autoBox = false; this.surf = 1; } // tyre-model state starts fresh next time
     }
     // ---- tyre model (bicycle model): front/rear slip angles -> saturating lateral forces -> sideways velocity + yaw ----
     // Each axle's grip follows a tyre curve that peaks at about 10 degrees of slip and then falls away a little, so a
     // slide has to be caught, not just waited out. The friction circle shares that grip with braking and drive:
     // brake hard into a corner and the front washes wide; spin the driven rear wheels and the tail steps out.
     tyres(u, v, c, env, dt) {
-      const s = this.s, L = s.w, lf = L * 0.32, lr = L * 0.32, Iz = (lf * lf + lr * lr) * 0.5;
+      const s = this.s, L = s.w, lf = L * 0.32, lr = L * 0.32, Iz = (lf * lf + lr * lr) * 0.3; // yaw inertia: low enough that the nose answers the wheel in ~0.2 s
       const G1 = 59, mu = (s.grip / 7.5) * env.grip;
       const gLat = G1 * 1.5 * mu;                             // peak sideways grip: ~1.5 g for a saloon, ~2 g for a supercar (1 g = 59 units/s^2)
       const AX = 1.1;                                         // the two axles share that grip (this used to be 2, which let every car corner at nearly 3 g)
@@ -136,7 +139,7 @@
       for (let k = 0; k < N; k++) {
         const spd = Math.abs(u), dir = u >= 0 ? 1 : -1;
         const steerMax = 0.62 / (1 + spd / 230);              // less lock at speed, like a real steering rack
-        this.delta += (c.s * steerMax - this.delta) * Math.min(1, h * 9);
+        this.delta += (c.s * steerMax - this.delta) * Math.min(1, h * 14); // the wheel turns in ~0.07 s: quick hands, no lag
         // weight transfer: braking loads the front (more steering), accelerating loads the rear
         const wf = clamp(0.5 - this.axLong * 0.0025, 0.3, 0.7), wr = 1 - wf;
         // a tyre carrying more load grips more, but not in proportion (load sensitivity): the heavier axle gives a little away
