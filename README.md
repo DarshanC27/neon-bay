@@ -1,9 +1,19 @@
-# 🌴 NEON BAY: an original open-city game
+<div align="center">
 
-A full 3D open-world driving, superhero and crime-sandbox game that runs in any modern browser. Plain HTML +
-JavaScript with a bundled copy of Three.js (`lib/`): no install, no build step, no internet needed.
+<img width="100%" src="https://capsule-render.vercel.app/api?type=waving&color=0:0a0e27,100:ff006e&height=200&section=header&text=NEON%20BAY&fontSize=56&fontColor=ffffff&fontAlignY=36&desc=An%20original%20open-city%20browser%20game&descSize=17&descAlignY=58&animation=fadeIn" alt="NEON BAY"/>
 
-**Play:** double-click `index.html` (Chrome or Edge), or run `python launch.py` from the Hack folder and open http://localhost:8003
+**A full 3D open-world driving, superhero and crime-sandbox game that runs in any modern browser.**<br/>Plain HTML + JavaScript with a bundled Three.js — no install, no build step.
+
+<a href="https://darshanc27.github.io/neon-bay/"><img src="https://img.shields.io/badge/Play-in%20browser-00ff9f?style=for-the-badge&labelColor=0a0e27&logo=googlechrome&logoColor=white" alt="Play"/></a>
+<img src="https://img.shields.io/badge/Engine-Three.js%20%C2%B7%20WebGL-1a1a2e?style=for-the-badge&labelColor=0a0e27&logo=threedotjs&logoColor=white" alt="Engine"/>
+<img src="https://img.shields.io/badge/Multiplayer-WebRTC%20voice-ff006e?style=for-the-badge&labelColor=0a0e27&logo=webrtc&logoColor=white" alt="Multiplayer"/>
+<img src="https://img.shields.io/badge/Licence-MIT-16213e?style=for-the-badge&labelColor=0a0e27" alt="Licence"/>
+
+[▶ Play now](https://darshanc27.github.io/neon-bay/) · [Features](#what-you-can-do)
+
+</div>
+
+---
 
 ## What you can do
 - **Four playable characters (press C to change suit):** Kai (regular human), **Spindle** (swings on grapple lines between
@@ -30,7 +40,7 @@ JavaScript with a bundled copy of Three.js (`lib/`): no install, no build step, 
 ## 🌐 Online multiplayer + voice chat
 Play in the same city with friends and talk to them.
 
-1. Start the server: `python mp_server.py` (or `python launch.py` from the Hack folder, which runs it on :8003)
+1. Start the server: `python mp_server.py`
 2. Open **http://localhost:8005** on this PC. Other PCs and phones on the same Wi-Fi open the **https://&lt;pc-ip&gt;:8445** link the server prints, and click *Advanced → Proceed* once (browsers only allow the microphone over https).
 3. On the title screen press **🌐 PLAY ONLINE**, type a name and the **same room name** as your friends, press CONNECT and allow the microphone. Then press NEW GAME or CONTINUE.
 
