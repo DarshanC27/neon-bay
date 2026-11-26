@@ -47,6 +47,8 @@ with sync_playwright() as p:
     # cops chase
     js(pg, "G.debug.setTime(21); G.debug.wanted(4)"); hold(pg, ["KeyW"], 4); time.sleep(3); shot(pg, "09_cops")
     print("cops:", js(pg, "({stars:G.wanted.stars, cops:G.cars.filter(c=>c.driver==='police').length, heli:!!G.heli})"))
+    # a chase at true-scale speed can end in a wreck that throws the driver out: clear the heat and get back in a car
+    js(pg, "(() => { if (G.player.car) return; G.clearWanted(); const P = G.player, c = new G.Car('compact', P.x + 20, P.y, 0); c.keep = true; G.cars.push(c); G.enterNearestCar(); })()"); time.sleep(0.4)
     js(pg, "G.clearWanted(); G.cars = G.cars.filter(c=>c.driver!=='police')")
     # map + phone
     pg.keyboard.press("KeyM"); time.sleep(0.6); pg.mouse.click(1000, 300); time.sleep(0.4); shot(pg, "10_map"); pg.keyboard.press("KeyM"); time.sleep(0.3)

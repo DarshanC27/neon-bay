@@ -347,12 +347,15 @@
     groundMats.push(m); return m;
   }
   R.wetUniform = wetU;
+  const streamStats = (R.streamStats = { chunks: 0, ms: 0, worst: 0 });
   function buildChunk(cx, cy) {
+    const t0 = performance.now();
     const mob = !!(G.settings && G.settings.mobile), S = mob ? 0.375 : 0.5, px = Math.round(GCH * S), x0 = cx * GCH, y0 = cy * GCH;
     const tex = canvasTex(px, px, (g) => { g.clearRect(0, 0, px, px); g.scale(S, S); g.translate(-x0, -y0); paintGround(g, x0, y0, x0 + GCH, y0 + GCH, true); });
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping; tex.anisotropy = 8;
     const mesh = new THREE.Mesh(chunkGeo, groundMaterial(tex)); mesh.rotation.x = -Math.PI / 2; mesh.position.set(x0 + GCH / 2, 0, y0 + GCH / 2); mesh.receiveShadow = true; scene.add(mesh);
     gChunks.set(cy * GCN + cx, { mesh, tex, cx, cy });
+    const dt0 = performance.now() - t0; streamStats.chunks++; streamStats.ms += dt0; streamStats.worst = Math.max(streamStats.worst, dt0);
   }
   let chunkGeo;
   function updateGround(all) {
@@ -1753,7 +1756,7 @@
         o.stillN = (o.stillN || 0) + 1;
       } else { o.stillN = 0; if (o.frozen) { o.frozen = false; o.root.matrixWorldAutoUpdate = true; } }
       const vF = c.vF || 0;
-      o.spin += (vF / 3.8) * dt; for (const w of o.wheels) w.rotation.z = -o.spin;
+      o.spin += (vF / 3.8) * dt * (c === P.car ? G.TRUE_SCALE : 1); for (const w of o.wheels) w.rotation.z = -o.spin;
       for (const s of o.steer) s.rotation.y += (-c.ctrl.s * 0.45 - s.rotation.y) * Math.min(1, dt * 10);
       const acc = (vF - o.pvF) / Math.max(dt, 1e-3); o.pvF = vF;
       const yawRate = angDiff(o.pa, c.a) / Math.max(dt, 1e-3); o.pa = c.a; // turning one way rolls the body out the other, braking dips the nose
@@ -2080,7 +2083,7 @@
     }
     pz = Math.max(pz, W.groundAt(px, py)[0] + 4, 4);
     const desired = new THREE.Vector3(px, pz, py);
-    if (cam3.pos.lengthSq() === 0 || cam3.snap) { cam3.pos.copy(desired); cam3.snap = false; } else cam3.pos.lerp(desired, Math.min(1, dt * (c ? 9 : 10)));
+    if (cam3.pos.lengthSq() === 0 || cam3.snap) { cam3.pos.copy(desired); cam3.snap = false; } else cam3.pos.lerp(desired, Math.min(1, dt * (c ? 9 + Math.min(9, c.speed / 60) : 10))); // a stiffer follow at speed, so the camera never trails behind
     camera.position.copy(cam3.pos);
     if (cam.shake > 0.1) { camera.position.x += rand(-cam.shake, cam.shake) * 0.4; camera.position.y += rand(-cam.shake, cam.shake) * 0.4; }
     cam.shake *= Math.pow(0.02, dt);

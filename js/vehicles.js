@@ -25,6 +25,7 @@
   // manual gearbox: each gear tops out (at the 7200 rpm redline) at this fraction of the car's top speed
   const RAT = (G.GEAR_RATIOS = [0, 0.2, 0.36, 0.52, 0.68, 0.84, 1.02]), REV_TOP = 0.3, IDLE = 900, RED = 7200;
   // torque curve: soft at idle, peak around 5000 rpm, tailing off towards the limiter
+  const TRUE_SCALE = (G.TRUE_SCALE = 0.6 / 0.36);
   const torque = (r) => clamp(0.45 + 1.4 * r - 1.1 * r * r, 0.3, 1);
   let nextId = 1;
 
@@ -120,7 +121,12 @@
         }
       }
       this.speed = Math.hypot(this.vx, this.vy);
-      this.x += this.vx * dt; this.y += this.vy * dt;
+      // True scale for the car you drive: the world is built at ~10 cm per unit, while the handling model (and the
+      // speedometer) count speed as if a unit were ~17 cm. The player's car covers ground at the true rate, so the dial
+      // reads real km/h past real-sized streets, and braking distances and cornering radii come out like a real car's.
+      // AI traffic keeps its own city pace, so its stopping and turning plans still line up with the lane graph.
+      const k = G.player && G.player.car === this ? TRUE_SCALE : 1;
+      this.x += this.vx * dt * k; this.y += this.vy * dt * k;
       if (!this.manual && !this.autoBox) this.rpm = 0;
       if (s.boat) this.keepInWater(ox, oy, oa);
       if (!this.sim && !this.motoReal()) { this.r = 0; this.delta = 0; this.axLong = 0; this.ayLat = 0; this.autoBox = false; this.surf = 1; } // tyre-model state starts fresh next time

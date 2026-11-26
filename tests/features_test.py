@@ -210,6 +210,13 @@ with sync_playwright() as p:
     js("""(() => { const P = G.player, t = G.cam3.tgt; G.tfar = []; for (let i = 0; i < 6; i++) { const p = G.makePed(0, 0, 0); p.x = t.x + 620 + i * 12; p.y = t.z + 40; p.keepTest = true; p.state = 'idle'; p.timer = 99; G.peds.push(p); G.tfar.push(p); } })()"""); time.sleep(0.6)
     check("distant pedestrians are drawn as instanced figures", js("G.render.farPeople()") >= 6, js("G.render.farPeople()"))
     js("G.peds = G.peds.filter(p => !p.keepTest)")
+    # ---- realism pass 4: true-scale driving, sculpted cars, kerbs
+    moved = js("""(() => { const c = new G.Car('sedan', 1000, 1000, 0), was = G.player.car; c.vx = 100; c.update(0.1, { grip: 1 }); const ai = c.x - 1000;
+        const d = new G.Car('sedan', 1000, 1000, 0); G.player.car = d; d.vx = 100; d.update(0.1, { grip: 1 }); G.player.car = was; return [ai, d.x - 1000]; })()""")
+    check("the player's car covers ground at true scale (AI keeps its pace)", abs(moved[1] / moved[0] - 0.6 / 0.36) < 0.05, str(moved))
+    check("kerbs line the pavements", js("G.render.curbCount") > 500, js("G.render.curbCount"))
+    shell = js("(() => { const c = G.cars.find(c => !c.s.bike && !c.s.air && !c.s.boat && c.type !== 'van' && G.render.debugCar(c)); const o = c && G.render.debugCar(c); return o ? [o.cabin.geometry.index.count, isFinite(o.seatX)] : null; })()")
+    check("cars are sculpted shells with flush glass and a seat", bool(shell) and shell[0] > 300 and shell[1], str(shell))
     # ---- realism pass 3: driving
     box = js("""(() => { const c = new G.Car('sedan', 0, 0, 0); c.sim = true; c.ctrl.t = 1; const gears = new Set(); let maxRpm = 0, t = 0, shifts = 0, pg = 1;
         while (t < 14) { c.update(1/60, { grip: 1 }); t += 1/60; gears.add(c.gear); maxRpm = Math.max(maxRpm, c.rpm); if (c.gear !== pg) { shifts++; pg = c.gear; } }
