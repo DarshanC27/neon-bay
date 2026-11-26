@@ -127,7 +127,7 @@ with sync_playwright() as p:
     check("motorbike pulls away like a real 600 (not 300 km/h in a second)", 10 < kmh < 90, f"{kmh} km/h after 1.2 s")
     js("G.exitCar()"); time.sleep(0.3)
     # ---- realistic (tyre model) vs arcade handling
-    js("(() => { G.debug.tp('velvet'); const P = G.player; const lp = G.world.randomLanePoint(P.x, P.y, 0, 300); const c = new G.Car('sports', lp.x, lp.y, lp.a); c.keep = true; G.cars.push(c); P.x = lp.x; P.y = lp.y + 20; G.enterNearestCar(); })()")
+    js("(() => { G.debug.tp('velvet'); const P = G.player; let lp = null; for (let k = 0; k < 40 && !lp; k++) lp = G.world.randomLanePoint(P.x, P.y, 0, 300 + k * 60); const c = new G.Car('sports', lp.x, lp.y, lp.a); c.keep = true; G.cars.push(c); P.x = lp.x; P.y = lp.y + 20; G.enterNearestCar(); })()")
     pg.keyboard.down("KeyW"); time.sleep(1.2); pg.keyboard.down("KeyD"); time.sleep(0.8); pg.keyboard.up("KeyD"); pg.keyboard.up("KeyW")
     check("realistic handling uses the tyre model", js("G.player.car.sim === true && isFinite(G.player.car.r) && G.player.car.speed > 30"), f"speed {js('Math.round(G.player.car.speed)')}")
     js("G.settings.handling = 'arcade'"); time.sleep(0.3)

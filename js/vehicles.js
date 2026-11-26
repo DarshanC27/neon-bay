@@ -54,6 +54,11 @@
       this.gear = g; this.shiftT = g === 0 ? 0 : 0.17; return true;
     }
     update(dt, env) {
+      // a non-finite position or velocity (a bad collision push, a zero-length normal) would freeze the car and drag
+      // the camera and audio with it: put the car back where it last was good, at rest
+      if (!(isFinite(this.x) && isFinite(this.y) && isFinite(this.vx) && isFinite(this.vy) && isFinite(this.a) && isFinite(this.speed))) {
+        const g = this._good || { x: 0, y: 0, a: 0 }; this.x = g.x; this.y = g.y; this.a = g.a; this.vx = this.vy = this.vF = this.speed = 0; this.r = 0; if (!isFinite(this.z)) this.z = 0;
+      } else { const g = this._good || (this._good = {}); g.x = this.x; g.y = this.y; g.a = this.a; }
       const c = this.ctrl, s = this.s;
       if (this.wrecked) { c.t = 0; c.s = 0; c.hb = true; c.boost = false; c.lift = 0; }
       if (s.air) return this.heliUpdate(dt, c);

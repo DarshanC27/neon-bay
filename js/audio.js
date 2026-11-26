@@ -96,7 +96,8 @@
     let pan = 0; const cam = G.render && G.render.camera;
     if (cam) { const e = cam.matrixWorld.elements; pan = clamp(nx * e[0] + ny * e[2], -1, 1) * 0.85; }
     const vs = -((src.vx || 0) * nx + (src.vy || 0) * ny), vl = (L.vx || 0) * nx + (L.vy || 0) * ny; // source closing in / listener closing in
-    return { d, pan, dop: clamp((SOUND + vl) / Math.max(200, SOUND - vs), 0.6, 1.6) };
+    const dop = clamp((SOUND + vl) / Math.max(200, SOUND - vs), 0.6, 1.6);
+    return { d, pan: isFinite(pan) ? pan : 0, dop: isFinite(dop) ? dop : 1 };
   }
   function chirp(t0, pan) { // a songbird: a few quick rising/falling whistles
     const ctx = A.ctx, n = randi(3, 6);

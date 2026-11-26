@@ -60,7 +60,9 @@
     const pel = mesh(cap(1.45, 2.6), pants, 0, -0.5, 0, hips); pel.rotation.x = Math.PI / 2; pel.scale.set(1.22, 1, 1);
     R.chest = mesh(torsoGeo(), shirt, 0, 3.6, 0, torso);
     // head
-    const head = (R.head = grp(torso, 0, 8.3, 0));
+    // realistic proportions: an adult's head is about 1/7.5 of their height, so the head group (and everything worn
+    // on it) is drawn at 80 %; the neck still meets the chest
+    const head = (R.head = grp(torso, 0, 8.3, 0)); head.scale.setScalar(0.8);
     mesh(cyl(0.9, 1.1, 1.4), skin, 0, -0.9, 0, head);
     R.skull = mesh(sph(2.25), st === "spindle" || st === "crimson" ? shirt : skin, 0.15, 1.3, 0, head);
     // limbs
