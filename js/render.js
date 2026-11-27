@@ -1516,6 +1516,7 @@
       let r = o.occ.get(id);
       if (r && r.outfitKey !== q.outfit) { o.tilt.remove(r.root); o.occ.delete(id); r = null; }
       if (!r) { r = HM().build(JSON.parse(q.outfit)); r.outfitKey = q.outfit; r.root.traverse((m) => m.isMesh && (m.castShadow = true)); o.tilt.add(r.root); o.occ.set(id, r); }
+      if (!o.bike) realBody(r, id, "seat"); // bikes keep the procedural riders (their poses are built around the bike)
       r.root.visible = !(q.key === "me" && G.state.camMode === 2);
       if (o.bike) {
         if (q.seat === 0) r.root.position.set(o.seatX, o.seatY - 9.6, 0); else r.root.position.set(o.pillion[0], o.pillion[1] - 9.6, 0);
@@ -1525,7 +1526,7 @@
         HM().animate(r, { mode: "sit", speed: 0 }, dt); r.torso.rotation.z = o.recline || 0.14;
       }
     }
-    for (const [id, r] of o.occ) if (!keep.has(id)) { o.tilt.remove(r.root); o.occ.delete(id); }
+    for (const [id, r] of o.occ) if (!keep.has(id)) { if (r.real) G.people.detach(r); o.tilt.remove(r.root); o.occ.delete(id); }
     // see-through glass + a simple interior when someone we care about is inside
     if (o.cabin) {
       const show = o.occ.size > 0;
@@ -1804,12 +1805,25 @@
   }
   // ----- people -----
   const rigs = new Map(), peopleSeen = new Set(), carsSeen = new Set(), copList = [];
-  function rigFor(key, outfit) {
+  function rigFor(key, outfit, role) {
     let r = rigs.get(key);
-    if (r && r.outfitKey !== outfit) { scene.remove(r.root); rigs.delete(key); r = null; }
+    if (r && r.outfitKey !== outfit) { if (r.real) G.people.detach(r); scene.remove(r.root); rigs.delete(key); r = null; }
     if (!r) { const o = typeof outfit === "string" ? JSON.parse(outfit) : outfit; r = HM().build(o); r.outfitKey = typeof outfit === "string" ? outfit : JSON.stringify(outfit); ambientEnv(r.root); scene.add(r.root); rigs.set(key, r); }
+    realBody(r, key, role);
     return r;
   }
+  // Realistic people (people.js): civilians, gang members, crews and the plain-clothes player get a real human body
+  // when they're near the camera; superhero suits keep their own models. The cast streams in after the game starts.
+  const REAL_STYLES = { civ: 1, gang: 1, kai: 1 };
+  function realBody(r, key, role) {
+    const PE = G.people; if (!PE || !role || !REAL_STYLES[r.style]) return;
+    if (!PE.ready) { if (!PE.loading && !PE.failed && G.state.started) PE.load(); return; }
+    if (r.seed === undefined) r.seed = key && typeof key === "object" ? (key._pid = key._pid || (key.id != null ? key.id : Math.random() * 1e9 | 0)) : key; // the same person always gets the same body
+    const p = r.root.position, d = Math.abs(p.x - cam3.tgt.x) + Math.abs(p.z - cam3.tgt.z);
+    if (r.real) { if (d > 560 && role !== "player" && role !== "seat") PE.detach(r); return; }
+    if (d < 460 || role === "player" || role === "seat") { const k = role === "player" || role === "seat" ? (PE.has(r.playerKey = r.playerKey || "athletic_man") ? r.playerKey : PE.pick(r.seed, "civ")) : PE.pick(r.seed, role); if (k) PE.attach(r, k); }
+  }
+  R.realPeople = () => (G.people ? G.people.active : 0);
   const outfitCache = {}; const heroOutfit = (id) => outfitCache[id] || (outfitCache[id] = JSON.stringify((G.heroes.LIST[id] || G.heroes.LIST.kai).outfit));
   const pedOutfit = (p) => p._of || (p._of = JSON.stringify({ style: "civ", skin: p.skin, shirt: p.shirt, pants: p.pants, hair: p.hair }));
   // People more than ~450 units away are drawn as simple figures (legs that swing, a body, a head): five instanced
@@ -1858,7 +1872,7 @@
       const dC = Math.abs(p.x - tgt.x) + Math.abs(p.y - tgt.z);
       p._far = !p.crew && dC > (p._far ? 420 : 480); // (a little slack so nobody flickers between the two at the boundary)
       if (p._far) { farPed(p, time); tag(p.fare && p.state === "wait" ? "🙋" : p.bubble > 0 && p.state !== "wait" ? "❗" : null, p.x, 30, p.y); continue; }
-      seen.add(p); const r = rigFor(p, pedOutfit(p)); rigLod(r, p.x, p.y);
+      seen.add(p); const r = rigFor(p, pedOutfit(p), p.crew ? "medic" : "civ"); rigLod(r, p.x, p.y);
       const st = p.state, a = r.pa || (r.pa = {});
       a.mode = st === "down" ? "down" : st === "flee" || st === "fleeAway" ? "flee" : st === "wait" ? (p.fare ? "wave" : "idle") : st === "curb" || st === "idle" ? "idle" : "walk";
       a.speed = st === "flee" || st === "fleeAway" ? 170 : st === "cross" ? p.speed * 1.2 : st === "wait" || st === "curb" || st === "idle" ? 0 : p.speed;
@@ -1872,7 +1886,7 @@
     }
     for (const e of G.gang) {
       if (!near(e.x, e.y, 1100)) continue;
-      seen.add(e); const r = rigFor(e, e._of || (e._of = JSON.stringify(e.outfit))); rigLod(r, e.x, e.y);
+      seen.add(e); const r = rigFor(e, e._of || (e._of = JSON.stringify(e.outfit)), "gang"); rigLod(r, e.x, e.y);
       HM().animate(r, e.anim, dt); r.root.position.set(e.x, e.z, e.y); r.root.rotation.y = -e.a;
       if (e.state === "webbed") { if (!r.cocoon) { r.cocoon = new THREE.Mesh(new THREE.CylinderGeometry(5, 6, 17, 10), new THREE.MeshStandardMaterial({ color: 0xf2fffd, roughness: 1, transparent: true, opacity: 0.85 })); r.cocoon.position.y = 10; r.root.add(r.cocoon); } r.cocoon.visible = true; }
       else if (r.cocoon) r.cocoon.visible = false;
@@ -1880,7 +1894,7 @@
     }
     // player hero
     if (G.state.started && !P.car && !P.ride) {
-      seen.add(P); const r = rigFor(P, heroOutfit(P.hero));
+      seen.add(P); const r = rigFor(P, heroOutfit(P.hero), "player");
       HM().animate(r, P.anim || { mode: "idle" }, dt);
       r.root.position.set(P.x, P.z || 0, P.y); r.root.rotation.y = -P.a;
       if (P.hitCd > 0.3) r.root.position.x += Math.sin(time * 80) * 0.6;
@@ -1896,7 +1910,9 @@
       r.root.position.set(p.x, p.z, p.y); r.root.rotation.y = -p.a; HM().animate(r, p.anim, dt);
     }
     flushFarPeds();
-    for (const [k, r] of rigs) if (!seen.has(k)) { scene.remove(r.root); rigs.delete(k); }
+    for (const [k, r] of rigs) if (!seen.has(k)) { if (r.real) G.people.detach(r); scene.remove(r.root); rigs.delete(k); }
+    if (G.people) G.people.prune(scene);
+    if (G.dogs) G.dogs.update(dt, time, scene, cam3.tgt.x, cam3.tgt.z);
     // web projectiles & shockwaves
     while (webMeshes.length < G.webs.length) { const m = new THREE.Mesh(new THREE.SphereGeometry(2.4, 8, 6), new THREE.MeshBasicMaterial({ color: 0xeafffd })); scene.add(m); webMeshes.push(m); }
     webMeshes.forEach((m, i) => { const w = G.webs[i]; m.visible = !!w; if (w) m.position.set(w.x, w.z, w.y); });
