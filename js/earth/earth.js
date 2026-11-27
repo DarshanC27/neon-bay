@@ -6,11 +6,18 @@
 // player gets far from the origin the frame is moved under them (recenter), so float precision stays good everywhere.
 import * as THREE from "three";
 import { TilesRenderer } from "3d-tiles-renderer";
-import { GoogleCloudAuthPlugin, GLTFExtensionsPlugin, TileCompressionPlugin, TilesFadePlugin, ReorientationPlugin, UnloadTilesPlugin } from "3d-tiles-renderer/plugins";
+import { GoogleCloudAuthPlugin, GLTFExtensionsPlugin, TileCompressionPlugin, ReorientationPlugin, UnloadTilesPlugin } from "3d-tiles-renderer/plugins";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { Sky } from "three/addons/objects/Sky.js";
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from "three-mesh-bvh";
 import { buildCar, CAR_TYPES } from "./car_model.js";
+
+// ray casts against the city use a BVH per tile mesh (built a few per frame as tiles stream in), so the car's ground
+// and wall probes test a handful of triangles instead of every triangle in view
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const D2R = Math.PI / 180, R2D = 180 / Math.PI;
 const KEY_STORE = "nb_gmaps_key", PREF_STORE = "nb_earth_prefs";
@@ -48,16 +55,18 @@ function nearestPlace(lat, lon) { let best = null, bd = 1e9; for (const p of PLA
 
 // ---------- renderer, scene, sky ----------
 const isTouch = matchMedia("(pointer: coarse)").matches;
-const renderer = new THREE.WebGLRenderer({ antialias: !isTouch, logarithmicDepthBuffer: true, powerPreference: "high-performance" });
-renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.5 : 2));
+const renderer = new THREE.WebGLRenderer({ antialias: !isTouch, powerPreference: "high-performance" });
+const PR_MAX = Math.min(devicePixelRatio, isTouch ? 1.25 : 1.5);
+let pixelRatio = PR_MAX;
+renderer.setPixelRatio(pixelRatio);
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.9;
 $("view").appendChild(renderer.domElement);
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.3, 4e5);
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 3e4);
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-const sky = new Sky(); sky.scale.setScalar(3e5); scene.add(sky);
+const sky = new Sky(); sky.scale.setScalar(3e4); scene.add(sky);
 const sun = new THREE.Vector3().setFromSphericalCoords(1, (90 - 35) * D2R, 200 * D2R);
 Object.assign(sky.material.uniforms.turbidity, { value: 6 }); sky.material.uniforms.rayleigh.value = 1.6;
 sky.material.uniforms.mieCoefficient.value = 0.004; sky.material.uniforms.sunPosition.value.copy(sun);
@@ -70,9 +79,9 @@ const blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMa
 blob.rotation.x = -Math.PI / 2; scene.add(blob);
 
 // ---------- prefs ----------
-const prefs = Object.assign({ quality: isTouch ? "low" : "high", car: "sports", color: "#c1121f", place: "Big Ben & Westminster" }, (() => { try { return JSON.parse(store.get(PREF_STORE) || "{}"); } catch (e) { return {}; } })());
+const prefs = Object.assign({ quality: isTouch ? "low" : "medium", car: "sports", color: "#c1121f", place: "Big Ben & Westminster" }, (() => { try { return JSON.parse(store.get(PREF_STORE) || "{}"); } catch (e) { return {}; } })());
 const savePrefs = () => store.set(PREF_STORE, JSON.stringify(prefs));
-const QUALITY = { low: 24, medium: 14, high: 8 };
+const QUALITY = { low: 40, medium: 24, high: 14 }; // tiles errorTarget: higher = fewer, coarser tiles
 
 // ---------- the car ----------
 let car = null;
@@ -96,12 +105,13 @@ function startTiles(key) {
   tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
   tiles.registerPlugin(new TileCompressionPlugin());
   tiles.registerPlugin(new UnloadTilesPlugin());
-  tiles.registerPlugin(new TilesFadePlugin());
   reorient = new ReorientationPlugin({ lat: origin.lat, lon: origin.lon, height: 0 });
   tiles.registerPlugin(reorient);
   tiles.errorTarget = QUALITY[prefs.quality] || 12;
   tiles.lruCache.minSize = isTouch ? 600 : 1500; tiles.lruCache.maxSize = isTouch ? 1200 : 3000;
   tiles.setCamera(camera); tiles.setResolutionFromRenderer(camera, renderer);
+  tiles.addEventListener("load-model", (e) => e.scene.traverse((o) => { if (o.isMesh) bvhQueue.push(o.geometry); }));
+  tiles.addEventListener("dispose-model", (e) => e.scene.traverse((o) => { if (o.isMesh && o.geometry.boundsTree) o.geometry.disposeBoundsTree(); }));
   tiles.addEventListener("load-root-tileset", () => { computeAxes(); toast("Connected to Google 3D Tiles"); });
   tiles.addEventListener("load-error", (e) => {
     const msg = String((e && (e.error && e.error.message)) || e.error || "");
@@ -121,6 +131,11 @@ function localToLatLon(v) {
   tiles.ellipsoid.getPositionToCartographic(p, out); return out; // radians
 }
 
+const bvhQueue = [];
+function buildBVHs(budgetMs) { // spread BVH builds over frames so streaming never stalls a frame
+  const t0 = performance.now();
+  while (bvhQueue.length && performance.now() - t0 < budgetMs) { const g = bvhQueue.shift(); if (!g.boundsTree && g.index !== undefined && g.attributes.position) { try { g.computeBoundsTree(); } catch (e) { /* skip odd tiles */ } } }
+}
 // ---------- ray casting against the real world ----------
 const ray = new THREE.Raycaster(); ray.firstHitOnly = true;
 const DOWN = new THREE.Vector3(0, -1, 0), tmpO = new THREE.Vector3();
@@ -215,7 +230,7 @@ function readInput() {
 }
 
 // ---------- simulation ----------
-const MAX_V = 78, ACC = 8.5, BRAKE = 20, REV_MAX = 14;
+const MAX_V = 100, ACC = 15, BRAKE = 24, REV_MAX = 16; // m/s: 100 = 224 mph, boost 125 = 280 mph
 function toggleFly() {
   if (P.mode === "drive") { P.mode = "fly"; P.pos.y += 40; P.v = Math.max(P.v, 40); P.flyPitch = 0; toast("Flying: W/S speed, A/D turn, Space/C climb and dive. F to land."); }
   else if (P.mode === "fly") { P.mode = "drop"; P.dropT = 0; P.dropHdg = yawToHeading(); P.v = 0; toast("Landing…"); }
@@ -238,9 +253,9 @@ let frameNo = 0;
 function stepDrive(dt, inp) {
   const f = fwd();
   // engine, brakes, drag
-  if (inp.thr > 0) P.v += ACC * (inp.boost ? 1.8 : 1) * inp.thr * dt * Math.max(0, 1 - P.v / (MAX_V * (inp.boost ? 1.25 : 1)));
+  if (inp.thr > 0) P.v += ACC * (inp.boost ? 1.8 : 1) * inp.thr * dt * Math.max(0, 1 - (P.v / (MAX_V * (inp.boost ? 1.25 : 1))) ** 2);
   else if (inp.thr < 0) P.v -= (P.v > 0.5 ? BRAKE : 6) * -inp.thr * dt;
-  P.v = Math.max(-REV_MAX, P.v - (P.v * 0.04 + Math.sign(P.v) * 0.25) * dt);
+  P.v = Math.max(-REV_MAX, P.v - (P.v * 0.02 + Math.sign(P.v) * 0.2) * dt);
   if (inp.hand) P.v -= Math.sign(P.v) * Math.min(Math.abs(P.v), 9 * dt);
   if (Math.abs(P.v) < 0.05 && inp.thr === 0) P.v = 0;
   if (!P.grounded) P.v *= 1 - 0.1 * dt;
@@ -264,7 +279,7 @@ function stepDrive(dt, inp) {
   const hl = car.length * 0.38, hw = car.width * 0.4, top = P.pos.y + 0.9;
   side.set(f.z, 0, -f.x);
   const gF = castDown(P.pos.x + f.x * hl, top, P.pos.z + f.z * hl, 40), gR = castDown(P.pos.x - f.x * hl, top, P.pos.z - f.z * hl, 40);
-  if (frameNo % 2 === 0) {
+  if (frameNo % 3 === 0) {
     const gL = castDown(P.pos.x + side.x * hw, top, P.pos.z + side.z * hw, 40), gRt = castDown(P.pos.x - side.x * hw, top, P.pos.z - side.z * hw, 40);
     if (gL && gRt) P.rollT = Math.atan2(gL.point.y - gRt.point.y, hw * 2);
   }
@@ -310,7 +325,7 @@ function updateCamera(dt) {
   // never let the camera sink into a wall or the road: pull it in along the ray from the car
   const eye = tw.copy(P.pos); eye.y += 1.4;
   const toCam = camera.position.clone().sub(eye), dist = toCam.length();
-  if (!fly && dist > 0.5 && frameNo % 2 === 0) { const h = castDir(eye, toCam.normalize(), dist); if (h) camera.position.copy(eye).addScaledVector(toCam, Math.max(0.6, h.distance - 0.4)); }
+  if (!fly && dist > 0.5 && frameNo % 3 === 1) { const h = castDir(eye, toCam.normalize(), dist); if (h) camera.position.copy(eye).addScaledVector(toCam, Math.max(0.6, h.distance - 0.4)); }
   camLook.lerp(tv.copy(P.pos).addScaledVector(f, 3).add(new THREE.Vector3(0, 1.1, 0)), Math.min(1, dt * 10));
   camera.lookAt(camLook);
   if (P.crashT > 0) { camera.position.x += (Math.random() - 0.5) * P.crashT; camera.position.y += (Math.random() - 0.5) * P.crashT; }
@@ -413,7 +428,7 @@ let last = performance.now(), hudT = 0, fpsN = 0, fpsT = 0;
 window.__earth = { P, camera, get tiles() { return tiles; }, goTo, stats: { fps: 0, rays: 0, frames: 0 } };
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min(0.05, (now - last) / 1000); last = now; frameNo++; rayCount = 0;
+  const dt = Math.min(0.1, (now - last) / 1000); // up to 0.1 s so a slow frame doesn't slow the car down last = now; frameNo++; rayCount = 0;
   const inp = readInput();
   if (tiles) {
     if (P.mode === "drop") stepDrop(dt); else if (P.mode === "drive") stepDrive(dt, inp); else stepFly(dt, inp);
@@ -422,11 +437,19 @@ function frame(now) {
   P.crashT = Math.max(0, P.crashT - dt);
   poseCar(dt); updateCamera(dt); audio.update(P.v, inp.thr);
   camera.updateMatrixWorld();
-  if (tiles) { tiles.setResolutionFromRenderer(camera, renderer); tiles.update(); }
+  // flying needs a deep view; driving a short one (better depth precision, cheaper)
+  const far = P.mode === "drive" ? 3e4 : 4e5, near = P.mode === "drive" ? 0.5 : 2;
+  if (camera.far !== far) { camera.far = far; camera.near = near; camera.updateProjectionMatrix(); sky.scale.setScalar(far * 1.05); }
+  if (tiles) { tiles.setResolutionFromRenderer(camera, renderer); tiles.update(); buildBVHs(P.mode === "drop" ? 12 : 4); }
   renderer.render(scene, camera);
   if ((hudT -= dt) <= 0) { hudT = 0.12; hud(); }
   if (toastT > 0 && (toastT -= dt) <= 0) $("toast").classList.remove("show");
-  fpsN++; fpsT += dt; if (fpsT > 1) { window.__earth.stats.fps = fpsN / fpsT; fpsN = 0; fpsT = 0; }
+  fpsN++; fpsT += dt; if (fpsT > 1) {
+    const fps = (window.__earth.stats.fps = fpsN / fpsT); fpsN = 0; fpsT = 0;
+    // dynamic resolution: trade sharpness for a smooth frame rate
+    const pr = fps < 38 ? Math.max(0.6, pixelRatio - 0.15) : fps > 55 ? Math.min(PR_MAX, pixelRatio + 0.1) : pixelRatio;
+    if (pr !== pixelRatio) { pixelRatio = pr; renderer.setPixelRatio(pr); }
+  }
   window.__earth.stats.rays = rayCount; window.__earth.stats.frames++;
 }
 addEventListener("resize", () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
