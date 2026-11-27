@@ -17,6 +17,8 @@
   #where { left: 16px; top: 16px; padding: 10px 14px; max-width: min(60vw, 420px); }
   #placeName { font-weight: 700; font-size: 16px; }
   #near, #coords, #net { color: var(--mute); font-size: 12px; }
+  .tag { display: inline-block; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--acc2); }
+  #near { color: var(--fg); }
   #net { color: var(--acc2); }
   #tools { right: 16px; top: 16px; display: flex; gap: 6px; padding: 6px; }
   button { font: inherit; color: var(--fg); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
@@ -68,6 +70,7 @@
 
 <div id="where" class="panel">
   <div id="placeName">Real UK</div>
+  <div id="worldName" class="tag"></div>
   <div id="near"></div>
   <div id="coords"></div>
   <div id="net"></div>
@@ -80,7 +83,7 @@
   <a href="index.html" class="desk"><button title="Back to Neon Bay">✕</button></a>
 </div>
 <div id="speedo" class="panel"><div id="speed">0</div><div id="unit">mph</div><div id="mode">LOADING</div></div>
-<div id="credit"><span class="glogo">Google</span><span id="attr"></span></div>
+<div id="credit"><span id="attr"></span></div>
 <div id="toast"></div>
 <div id="loading" class="panel" hidden><div class="spin"></div>Streaming the real UK…</div>
 
@@ -89,21 +92,21 @@
   <input id="placeSearch" type="search" placeholder="City, landmark, street or postcode…" autocomplete="off">
   <ul id="places"></ul>
   <div class="row">Detail: <button id="q_low">Low</button><button id="q_medium">Medium</button><button id="q_high">High</button>
-    &nbsp; Paint: <input id="color" type="color"> <button id="changeKey">API key</button></div>
+    &nbsp; Paint: <input id="color" type="color"> <button id="changeKey">Photo-real (Google)</button></div>
   <p class="help desk"><kbd>W A S D</kbd> / arrows drive · <kbd>Shift</kbd> boost · <kbd>Space</kbd> handbrake · <kbd>F</kbd> fly / land · <kbd>Space</kbd>/<kbd>C</kbd> climb / dive (flying) · <kbd>V</kbd> camera · <kbd>T</kbd> car · <kbd>R</kbd> reset · <kbd>M</kbd> places. Gamepad: RT/LT, stick, Y fly, X reset.</p>
-  <p class="help">Street search by <a href="https://nominatim.openstreetmap.org/" target="_blank" rel="noopener">OpenStreetMap Nominatim</a>. 3D imagery © Google and its data providers.</p>
+  <p class="help">Map © OpenStreetMap contributors (OpenFreeMap, OpenMapTiles), terrain from AWS Terrain Tiles. Street search by <a href="https://nominatim.openstreetmap.org/" target="_blank" rel="noopener">OpenStreetMap Nominatim</a>. 3D imagery © Google and its data providers.</p>
   <button id="closeMenu" class="main">Drive</button>
 </div>
 
 <div id="keyPanel" class="panel" hidden>
-  <h2>Real UK needs a Google Maps key</h2>
-  <p class="help">The real buildings, roads and landmarks come from Google's Photorealistic 3D Tiles. Create a key in
+  <h2>Optional: photo-real Google 3D</h2>
+  <p class="help">The game already shows the real UK from OpenStreetMap with no key. For Google's photo-real 3D buildings instead, create a key in
     <a href="https://console.cloud.google.com/google/maps-apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>,
     enable the <b>Map Tiles API</b> for it, and paste it here. The key stays in this browser only.</p>
   <input id="keyInput" type="password" placeholder="AIza…" autocomplete="off" spellcheck="false">
   <div class="row"><label><input id="keyRemember" type="checkbox" checked> Remember on this device</label></div>
   <p id="keyMsg" class="help" style="color:#ff8fab"></p>
-  <div class="row"><button id="keyGo" class="main">Start driving</button> <a href="index.html"><button>Back to Neon Bay</button></a></div>
+  <div class="row"><button id="keyGo" class="main">Use Google 3D</button> <button id="keySkip">Use the free open map</button></div>
 </div>
 
 <div id="touchUI">
