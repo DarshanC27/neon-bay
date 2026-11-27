@@ -1,11 +1,12 @@
 // Offline support for the installed (Home Screen) app.
 // Network-first so updates always show up when online; falls back to the cache when offline.
-const CACHE = "neonbay-v12";
+const CACHE = "neonbay-v13";
 const FILES = [
   "./", "./index.html", "./manifest.webmanifest", "./lib/three.min.js",
   "./js/util.js", "./js/controls.js", "./js/touch.js", "./js/world.js", "./js/vehicles.js", "./js/actors.js",
   "./js/humanoid.js", "./lib/GLTFLoader.js", "./lib/SkeletonUtils.js", "./js/people.js", "./js/dogs.js", "./js/heroes.js", "./js/missions.js", "./js/jobs.js", "./js/emergency.js", "./js/campaign.js", "./js/finale.js", "./js/audio.js",
   "./js/render.js", "./js/spectacle.js", "./js/agents.js", "./js/property.js", "./js/ui.js", "./js/p2p.js", "./js/net.js", "./js/main.js",
+  "./earth.html", "./js/earth/earth.js", "./js/earth/car_model.js", "./assets/uk/uk.json",
   "./icons/icon-180.png", "./icons/icon-192.png", "./icons/icon-512.png",
 ];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting())); });

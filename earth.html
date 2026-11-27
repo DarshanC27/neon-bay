@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Neon Bay: Real UK</title>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root { --bg: rgba(10, 14, 22, 0.78); --fg: #f1f4f8; --mute: #9aa6b6; --acc: #ff3d7f; --acc2: #2de2e6; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f16; color: var(--fg); font: 14px/1.4 "Segoe UI", system-ui, sans-serif; touch-action: none; user-select: none; }
+  #view canvas { display: block; }
+  .panel { position: fixed; background: var(--bg); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; }
+  #speedo { right: 16px; bottom: 16px; padding: 10px 16px; text-align: right; min-width: 120px; }
+  #speed { font-size: 44px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+  #unit, #mode { color: var(--mute); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+  #mode { color: var(--acc2); }
+  #where { left: 16px; top: 16px; padding: 10px 14px; max-width: min(60vw, 420px); }
+  #placeName { font-weight: 700; font-size: 16px; }
+  #near, #coords, #net { color: var(--mute); font-size: 12px; }
+  #net { color: var(--acc2); }
+  #tools { right: 16px; top: 16px; display: flex; gap: 6px; padding: 6px; }
+  button { font: inherit; color: var(--fg); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+  button:hover { background: rgba(255,255,255,0.16); }
+  button.main { background: var(--acc); border-color: var(--acc); font-weight: 700; }
+  button.on { background: var(--acc2); color: #061018; border-color: var(--acc2); }
+  #credit { position: fixed; left: 12px; bottom: 8px; font-size: 11px; color: #fff; text-shadow: 0 1px 2px #000; max-width: 60vw; pointer-events: none; }
+  #credit .glogo { font: 700 15px Arial, sans-serif; letter-spacing: -0.02em; margin-right: 6px; }
+  #toast { position: fixed; left: 50%; top: 18px; transform: translate(-50%, -30px); opacity: 0; transition: 0.3s; padding: 8px 16px; background: var(--bg); border-radius: 20px; pointer-events: none; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #loading { left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 18px 26px; text-align: center; }
+  .spin { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,0.2); border-top-color: var(--acc2); border-radius: 50%; margin: 0 auto 10px; animation: sp 0.9s linear infinite; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  #menu, #keyPanel { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; padding: 18px; box-sizing: border-box; z-index: 5; }
+  h2 { margin: 0 0 10px; font-size: 18px; }
+  input[type=text], input[type=password], input[type=search] { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.18); background: rgba(0,0,0,0.35); color: var(--fg); font: inherit; }
+  #places { list-style: none; margin: 10px 0; padding: 0; max-height: 40vh; overflow: auto; }
+  #places li { display: flex; justify-content: space-between; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+  #places li:hover { background: rgba(255,255,255,0.08); }
+  #places small { color: var(--mute); text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .help { color: var(--mute); font-size: 12px; }
+  .help kbd { background: rgba(255,255,255,0.12); border-radius: 4px; padding: 1px 5px; font-family: inherit; }
+  a { color: var(--acc2); }
+  #touchUI { display: none; }
+  @media (pointer: coarse) {
+    #touchUI { display: block; }
+    .tb { position: fixed; bottom: 22px; width: 74px; height: 74px; border-radius: 50%; background: rgba(255,255,255,0.14); border: 2px solid rgba(255,255,255,0.25); display: grid; place-items: center; font-size: 26px; }
+    .tb.on { background: rgba(45,226,230,0.45); }
+    #speedo { bottom: auto; top: 76px; padding: 6px 12px; } #speed { font-size: 30px; }
+    .desk { display: none; }
+  }
+  [hidden] { display: none !important; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+  "3d-tiles-renderer": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.4/build/index.js",
+  "3d-tiles-renderer/plugins": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.4/build/index.plugins.js",
+  "3d-tiles-renderer/three": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.4/build/index.three.js",
+  "3d-tiles-renderer/core": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.4/build/index.core.js"
+} }
+</script>
+</head>
+<body>
+<div id="view"></div>
+
+<div id="where" class="panel">
+  <div id="placeName">Real UK</div>
+  <div id="near"></div>
+  <div id="coords"></div>
+  <div id="net"></div>
+</div>
+<div id="tools" class="panel">
+  <button id="menuBtn" title="Places (M)">🗺 Places</button>
+  <button id="flyBtn" title="Fly / land (F)">✈</button>
+  <button id="carBtn" title="Change car (T)">🚗</button>
+  <button id="camBtn" title="Camera (V)">🎥</button>
+  <a href="index.html" class="desk"><button title="Back to Neon Bay">✕</button></a>
+</div>
+<div id="speedo" class="panel"><div id="speed">0</div><div id="unit">mph</div><div id="mode">LOADING</div></div>
+<div id="credit"><span class="glogo">Google</span><span id="attr"></span></div>
+<div id="toast"></div>
+<div id="loading" class="panel" hidden><div class="spin"></div>Streaming the real UK…</div>
+
+<div id="menu" class="panel" hidden>
+  <h2>Go anywhere in the UK</h2>
+  <input id="placeSearch" type="search" placeholder="City, landmark, street or postcode…" autocomplete="off">
+  <ul id="places"></ul>
+  <div class="row">Detail: <button id="q_low">Low</button><button id="q_medium">Medium</button><button id="q_high">High</button>
+    &nbsp; Paint: <input id="color" type="color"> <button id="changeKey">API key</button></div>
+  <p class="help desk"><kbd>W A S D</kbd> / arrows drive · <kbd>Shift</kbd> boost · <kbd>Space</kbd> handbrake · <kbd>F</kbd> fly / land · <kbd>Space</kbd>/<kbd>C</kbd> climb / dive (flying) · <kbd>V</kbd> camera · <kbd>T</kbd> car · <kbd>R</kbd> reset · <kbd>M</kbd> places. Gamepad: RT/LT, stick, Y fly, X reset.</p>
+  <p class="help">Street search by <a href="https://nominatim.openstreetmap.org/" target="_blank" rel="noopener">OpenStreetMap Nominatim</a>. 3D imagery © Google and its data providers.</p>
+  <button id="closeMenu" class="main">Drive</button>
+</div>
+
+<div id="keyPanel" class="panel" hidden>
+  <h2>Real UK needs a Google Maps key</h2>
+  <p class="help">The real buildings, roads and landmarks come from Google's Photorealistic 3D Tiles. Create a key in
+    <a href="https://console.cloud.google.com/google/maps-apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>,
+    enable the <b>Map Tiles API</b> for it, and paste it here. The key stays in this browser only.</p>
+  <input id="keyInput" type="password" placeholder="AIza…" autocomplete="off" spellcheck="false">
+  <div class="row"><label><input id="keyRemember" type="checkbox" checked> Remember on this device</label></div>
+  <p id="keyMsg" class="help" style="color:#ff8fab"></p>
+  <div class="row"><button id="keyGo" class="main">Start driving</button> <a href="index.html"><button>Back to Neon Bay</button></a></div>
+</div>
+
+<div id="touchUI">
+  <div class="tb" data-t="left" style="left:18px">◀</div>
+  <div class="tb" data-t="right" style="left:104px">▶</div>
+  <div class="tb" data-t="brake" style="right:104px">⏬</div>
+  <div class="tb" data-t="gas" style="right:18px">⏫</div>
+  <div class="tb" data-t="up" style="right:18px; bottom:108px; width:56px; height:56px; font-size:18px">▲</div>
+  <div class="tb" data-t="down" style="right:84px; bottom:108px; width:56px; height:56px; font-size:18px">▼</div>
+</div>
+<script type="module" src="js/earth/earth.js"></script>
+</body>
+</html>
